@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KindredPune | Profile</title>
+    <meta
+      name="description"
+      content="Update your KindredPune skills, languages, availability, and base location."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-guard="auth" data-roles="volunteer,ngo_worker,admin,csr_partner">
+    <div class="page-shell">
+      <div class="ambient-shape one"></div>
+      <div class="ambient-shape two"></div>
+      <div class="ambient-shape three"></div>
+
+      <header class="site-header">
+        <a class="brand" href="./index.html">
+          <div class="brand-mark"></div>
+          <div class="brand-copy">
+            <strong>KindredPune</strong>
+            <span>Civic intelligence, made human</span>
+          </div>
+        </a>
+        <nav class="site-nav">
+          <a href="./index.html">Home</a>
+          <a href="./intelligence.html">Intelligence</a>
+          <a href="./community.html">Community</a>
+          <a href="./impact.html">Impact</a>
+          <a href="./join.html">Join</a>
+        </nav>
+        <div class="header-actions">
+          <span class="pill-tag">Profile</span>
+          <a class="soft-button ghost-button" href="./intelligence.html">Open dashboard</a>
+        </div>
+      </header>
+
+      <main>
+        <section class="page-hero fade-in">
+          <div class="page-hero-panel">
+            <div class="page-hero-grid slim">
+              <div class="page-hero-copy">
+                <span class="eyebrow">Your profile</span>
+                <h1>Skills and availability shape better routing.</h1>
+                <p>
+                  Volunteers, NGO workers, admins, and CSR partners all keep their
+                  profile in the same design system, with the right fields to make
+                  matching and communication work better.
+                </p>
+              </div>
+              <div class="page-hero-visual">
+                <article class="visual-card teal">
+                  <span class="side-kicker">Matching inputs</span>
+                  <ul class="pill-list">
+                    <li>Skills</li>
+                    <li>Languages</li>
+                    <li>Availability</li>
+                    <li>Base location</li>
+                  </ul>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in">
+          <div class="sheet sand">
+            <div class="two-column-grid">
+              <article class="contact-card sand">
+                <h3>Update your details</h3>
+                <form class="stack-form" id="profileForm">
+                  <label>
+                    Name
+                    <input id="profileName" name="name" required />
+                  </label>
+                  <label>
+                    Skills
+                    <input id="profileSkills" name="skills" placeholder="medical, logistics, outreach" />
+                  </label>
+                  <label>
+                    Languages
+                    <input id="profileLanguages" name="languages" placeholder="Marathi, Hindi, English" />
+                  </label>
+                  <label>
+                    Availability
+                    <input id="profileAvailability" name="availability" placeholder="Weekends, weekdays, evenings" />
+                  </label>
+                  <label>
+                    Base location
+                    <input id="profileLocation" name="baseLocation" placeholder="Kothrud, Shivajinagar, Pimpri..." />
+                  </label>
+                  <button class="cta-button" type="submit">Save profile</button>
+                </form>
+              </article>
+
+              <div class="stack-column">
+                <article class="contact-card lavender">
+                  <span class="side-kicker">Why it matters</span>
+                  <p class="muted">
+                    Volunteer buddy matching uses skill overlap and base location.
+                    NGO and admin workflows also benefit from language and routing clarity.
+                  </p>
+                </article>
+                <article class="contact-card blue">
+                  <span class="side-kicker">Tip</span>
+                  <p class="muted">
+                    Keep skills comma-separated so the matching engine can reuse them directly.
+                  </p>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>KindredPune profile</span>
+        <span>Editable routing and matching details for every signed-in user</span>
+      </footer>
+    </div>
+
+    <script src="./main.js"></script>
+  </body>
+</html>

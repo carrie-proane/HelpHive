@@ -68,15 +68,15 @@
                 <div class="quick-stats">
                   <div class="stat-chip">
                     <span>High-intensity wards</span>
-                    <strong>04 now</strong>
+                    <strong><span data-overview-key="criticalClusters">04</span> now</strong>
                   </div>
                   <div class="stat-chip">
                     <span>Average routing time</span>
-                    <strong>17 min</strong>
+                    <strong><span data-overview-key="responseCycle">2h 14m</span></strong>
                   </div>
                   <div class="stat-chip">
                     <span>Escalations cleared</span>
-                    <strong>83%</strong>
+                    <strong><span data-overview-key="volunteerReadiness">83%</span></strong>
                   </div>
                 </div>
               </div>
@@ -168,18 +168,10 @@
                 <article class="dashboard-preview">
                   <span class="side-kicker">Drilldown</span>
                   <h4>Shivajinagar ward card</h4>
-                  <ul>
+                  <ul id="intelDeskSummary">
                     <li>
-                      <span>Households without refill</span>
-                      <strong>37</strong>
-                    </li>
-                    <li>
-                      <span>Assigned NGO</span>
-                      <strong>Jeevan Dhara</strong>
-                    </li>
-                    <li>
-                      <span>Escalation window</span>
-                      <strong>Before 1 PM</strong>
+                      <span>Open needs</span>
+                      <strong>Loading...</strong>
                     </li>
                   </ul>
                 </article>
@@ -187,22 +179,42 @@
                 <article class="match-card">
                   <span class="side-kicker">Volunteer logic</span>
                   <h3>Matching now takes skill, distance, and time window into account.</h3>
-                  <ul class="match-list">
+                  <ul class="match-list" id="intelVolunteerSummary">
                     <li>
-                      <span>Meal prep volunteers</span>
-                      <strong>06 nearby</strong>
-                    </li>
-                    <li>
-                      <span>Water lane runners</span>
-                      <strong>03 in transit</strong>
-                    </li>
-                    <li>
-                      <span>Call-back support</span>
-                      <strong>08 available</strong>
+                      <span>Matching lane</span>
+                      <strong>Loading...</strong>
                     </li>
                   </ul>
                 </article>
               </aside>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in" id="intelTaskSection">
+          <div class="sheet sand">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Live assignments</span>
+                <h2>Tasks stay close to the map, not hidden behind it</h2>
+              </div>
+              <p data-role-copy>
+                Open tasks, buddy recommendations, and completion actions are all
+                visible here for the current response flow.
+              </p>
+            </div>
+
+            <div class="split-panel">
+              <div class="task-stack" id="intelTaskList">
+                <div class="empty-state">
+                  <p>Loading live tasks...</p>
+                </div>
+              </div>
+              <div class="task-stack" id="intelAlertList">
+                <div class="empty-state">
+                  <p>Loading silent-need alerts...</p>
+                </div>
+              </div>
             </div>
           </div>
         </section>
