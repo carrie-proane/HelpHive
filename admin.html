@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KindredPune | Admin Dashboard</title>
+    <meta
+      name="description"
+      content="Admin review queue, system metrics, alerts, and volunteer matching for KindredPune."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-guard="auth" data-roles="admin">
+    <div class="page-shell">
+      <div class="ambient-shape one"></div>
+      <div class="ambient-shape two"></div>
+      <div class="ambient-shape three"></div>
+
+      <header class="site-header">
+        <a class="brand" href="./index.html">
+          <div class="brand-mark"></div>
+          <div class="brand-copy">
+            <strong>KindredPune</strong>
+            <span>Civic intelligence, made human</span>
+          </div>
+        </a>
+        <nav class="site-nav">
+          <a href="./index.html">Home</a>
+          <a href="./intelligence.html">Intelligence</a>
+          <a href="./community.html">Community</a>
+          <a href="./impact.html">Impact</a>
+          <a href="./join.html">Join</a>
+        </nav>
+        <div class="header-actions">
+          <span class="pill-tag">Admin mode</span>
+          <a class="soft-button ghost-button" href="./report.html">Open intake</a>
+        </div>
+      </header>
+
+      <main>
+        <section class="page-hero fade-in">
+          <div class="page-hero-panel">
+            <div class="page-hero-grid slim">
+              <div class="page-hero-copy">
+                <span class="eyebrow">Admin dashboard</span>
+                <h1>System-wide oversight without losing the human texture.</h1>
+                <p>
+                  This view centralizes alerts, review items, and matching controls
+                  while staying visually aligned with the rest of KindredPune.
+                </p>
+              </div>
+              <div class="page-hero-visual">
+                <article class="visual-card coral">
+                  <span class="side-kicker">Ops controls</span>
+                  <div class="inline-actions">
+                    <button id="runMatchingButton" class="cta-button" type="button">Run volunteer matching</button>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in">
+          <div class="sheet sand">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">System pulse</span>
+                <h2>Metrics, alerts, and review work in one surface</h2>
+              </div>
+              <p>
+                Admin users can monitor open need pressure, review queue load, and
+                matching quality without leaving the same visual system.
+              </p>
+            </div>
+
+            <div class="dashboard-grid" id="adminSummary">
+              <div class="empty-state"><p>Loading admin metrics...</p></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in">
+          <div class="sheet lavender">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Alerts and matching</span>
+                <h2>Explainable silent-need alerts stay close to the controls</h2>
+              </div>
+              <p>
+                Trigger matching, inspect active alerts, and review the latest pairings here.
+              </p>
+            </div>
+
+            <div class="split-panel">
+              <div class="task-stack" id="adminAlerts">
+                <div class="empty-state"><p>Loading alerts...</p></div>
+              </div>
+              <div class="task-stack" id="matchResults">
+                <div class="empty-state"><p>Matching results will appear here.</p></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in">
+          <div class="sheet teal">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Review queue</span>
+                <h2>Low-confidence OCR and transcription items wait here for approval</h2>
+              </div>
+              <p>
+                Admin corrections are logged so the workflow can support active learning later.
+              </p>
+            </div>
+
+            <div class="review-stack" id="reviewQueue">
+              <div class="empty-state"><p>Loading review queue...</p></div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>KindredPune admin dashboard</span>
+        <span>Review, alerts, and volunteer matching controls</span>
+      </footer>
+    </div>
+
+    <script src="./main.js"></script>
+  </body>
+</html>

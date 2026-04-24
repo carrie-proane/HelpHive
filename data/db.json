@@ -1,0 +1,375 @@
+{
+  "meta": {
+    "seededAt": "2026-04-24T11:31:16.503Z",
+    "version": 1
+  },
+  "companies": [
+    {
+      "id": "company_sunrise",
+      "name": "Sunrise CSR Collective"
+    },
+    {
+      "id": "company_aurora",
+      "name": "Aurora Impact Partners"
+    }
+  ],
+  "users": [
+    {
+      "id": "user_admin",
+      "name": "Asha Kulkarni",
+      "email": "admin@kindredpune.org",
+      "passwordHash": "$2a$10$kgXYn.8UISVtlBQod1vOguQQ3BuxUO9FtJz2DGiRDqfY8VoH9rqOi",
+      "role": "admin",
+      "skills": [
+        "coordination",
+        "governance",
+        "review"
+      ],
+      "languages": [
+        "Marathi",
+        "Hindi",
+        "English"
+      ],
+      "availability": "Full-time",
+      "baseLocation": "Shivajinagar",
+      "latitude": 18.5314,
+      "longitude": 73.8446,
+      "companyId": null
+    },
+    {
+      "id": "user_ngo",
+      "name": "Meera Patil",
+      "email": "ngo@kindredpune.org",
+      "passwordHash": "$2a$10$kgXYn.8UISVtlBQod1vOguQQ3BuxUO9FtJz2DGiRDqfY8VoH9rqOi",
+      "role": "ngo_worker",
+      "skills": [
+        "community outreach",
+        "survey intake",
+        "routing"
+      ],
+      "languages": [
+        "Marathi",
+        "Hindi"
+      ],
+      "availability": "Weekdays 8 AM - 6 PM",
+      "baseLocation": "Kasba Peth",
+      "latitude": 18.5204,
+      "longitude": 73.8567,
+      "companyId": null
+    },
+    {
+      "id": "user_volunteer_1",
+      "name": "Aditya Kale",
+      "email": "volunteer@kindredpune.org",
+      "passwordHash": "$2a$10$kgXYn.8UISVtlBQod1vOguQQ3BuxUO9FtJz2DGiRDqfY8VoH9rqOi",
+      "role": "volunteer",
+      "skills": [
+        "logistics",
+        "meal distribution",
+        "marathi"
+      ],
+      "languages": [
+        "Marathi",
+        "Hindi"
+      ],
+      "availability": "Weekends and evenings",
+      "baseLocation": "Kothrud",
+      "latitude": 18.5074,
+      "longitude": 73.8077,
+      "companyId": null
+    },
+    {
+      "id": "user_volunteer_2",
+      "name": "Fatima Shaikh",
+      "email": "buddy@kindredpune.org",
+      "passwordHash": "$2a$10$kgXYn.8UISVtlBQod1vOguQQ3BuxUO9FtJz2DGiRDqfY8VoH9rqOi",
+      "role": "volunteer",
+      "skills": [
+        "medical",
+        "triage",
+        "marathi"
+      ],
+      "languages": [
+        "Marathi",
+        "Hindi",
+        "Urdu"
+      ],
+      "availability": "Mornings",
+      "baseLocation": "Yerawada",
+      "latitude": 18.5538,
+      "longitude": 73.8893,
+      "companyId": null
+    },
+    {
+      "id": "user_csr",
+      "name": "Rohan Deshpande",
+      "email": "csr@kindredpune.org",
+      "passwordHash": "$2a$10$kgXYn.8UISVtlBQod1vOguQQ3BuxUO9FtJz2DGiRDqfY8VoH9rqOi",
+      "role": "csr_partner",
+      "skills": [
+        "reporting",
+        "funding"
+      ],
+      "languages": [
+        "English",
+        "Hindi"
+      ],
+      "availability": "Business hours",
+      "baseLocation": "Camp",
+      "latitude": 18.5169,
+      "longitude": 73.8785,
+      "companyId": "company_sunrise"
+    }
+  ],
+  "needs": [
+    {
+      "id": "need_water_1",
+      "type": "water",
+      "title": "Water shortage - Shivajinagar",
+      "description": "Handwritten lane survey and follow-up calls show water refill gaps across 14 households.",
+      "locationName": "Shivajinagar",
+      "latitude": 18.5314,
+      "longitude": 73.8446,
+      "severity": "critical",
+      "source": "ocr",
+      "timestamp": "2026-04-24T07:31:16.505Z",
+      "status": "resolved",
+      "ngo": "Jeevan Dhara",
+      "confidence": 0.74,
+      "needsReview": true,
+      "explanation": "14 reports of low water access captured across the last 2 days.",
+      "language": "Devanagari",
+      "extractedText": "पाणी कमी आहे शिवाजीनगर 14 घरे"
+    },
+    {
+      "id": "need_sanitation_1",
+      "type": "sanitation",
+      "title": "Waste overflow - Pimpri",
+      "description": "Morning desk notes show drain blockage and overflow near the market road.",
+      "locationName": "Pimpri",
+      "latitude": 18.6298,
+      "longitude": 73.7997,
+      "severity": "urgent",
+      "source": "whatsapp",
+      "timestamp": "2026-04-24T05:31:16.505Z",
+      "status": "open",
+      "ngo": "Seva Setu",
+      "confidence": 0.91,
+      "needsReview": false,
+      "explanation": "8 messages and 3 follow-up notes in the last 24 hours.",
+      "language": "Marathi"
+    },
+    {
+      "id": "need_volunteer_1",
+      "type": "volunteer",
+      "title": "Volunteers needed - Kothrud kitchen",
+      "description": "Evening meal packing needs two more local volunteers with logistics experience.",
+      "locationName": "Kothrud",
+      "latitude": 18.5074,
+      "longitude": 73.8077,
+      "severity": "stable",
+      "source": "manual",
+      "timestamp": "2026-04-24T09:31:16.505Z",
+      "status": "open",
+      "ngo": "Nagrik Mitra",
+      "confidence": 0.95,
+      "needsReview": false,
+      "explanation": "Coordinator flagged a repeat gap during the dinner shift.",
+      "language": "English"
+    },
+    {
+      "id": "need_medical_1",
+      "type": "medical",
+      "title": "Fever cluster - Yerawada",
+      "description": "Audio reports mention repeated fever and medicine shortages in a compact lane cluster.",
+      "locationName": "Yerawada",
+      "latitude": 18.5538,
+      "longitude": 73.8893,
+      "severity": "critical",
+      "source": "audio",
+      "timestamp": "2026-04-24T06:31:16.505Z",
+      "status": "open",
+      "ngo": "Jeevan Dhara",
+      "confidence": 0.86,
+      "needsReview": false,
+      "explanation": "12 illness mentions within the last 5 days.",
+      "language": "Hindi"
+    },
+    {
+      "id": "need_water_2",
+      "type": "water",
+      "title": "Purification support - Kasba Peth",
+      "description": "Two handwritten survey sheets mention muddy water and poor purification access.",
+      "locationName": "Kasba Peth",
+      "latitude": 18.5204,
+      "longitude": 73.8567,
+      "severity": "urgent",
+      "source": "ocr",
+      "timestamp": "2026-04-23T08:31:16.505Z",
+      "status": "open",
+      "ngo": "Jeevan Dhara",
+      "confidence": 0.82,
+      "needsReview": false,
+      "explanation": "Repeated low-confidence water quality mentions.",
+      "language": "Devanagari"
+    },
+    {
+      "id": "need_food_1",
+      "type": "food",
+      "title": "Ration restock - Hadapsar",
+      "description": "WhatsApp intake requests dry ration support for 23 households after wage disruption.",
+      "locationName": "Hadapsar",
+      "latitude": 18.5089,
+      "longitude": 73.9259,
+      "severity": "urgent",
+      "source": "sms",
+      "timestamp": "2026-04-24T02:31:16.505Z",
+      "status": "resolved",
+      "ngo": "Nagrik Mitra",
+      "confidence": 0.93,
+      "needsReview": false,
+      "explanation": "Case resolved with 3 completed volunteer runs.",
+      "language": "Marathi"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "task_1",
+      "needId": "need_water_1",
+      "title": "Water shortage - Shivajinagar",
+      "type": "water",
+      "locationName": "Shivajinagar",
+      "latitude": 18.5314,
+      "longitude": 73.8446,
+      "severity": "critical",
+      "status": "completed",
+      "requiredSkills": [
+        "logistics",
+        "marathi",
+        "community outreach"
+      ],
+      "assignedVolunteerIds": [
+        "user_volunteer_1"
+      ],
+      "buddySuggestionIds": [
+        "user_volunteer_2"
+      ],
+      "sponsorCompanyId": "company_sunrise",
+      "createdAt": "2026-04-24T07:31:16.505Z",
+      "updatedAt": "2026-04-24T11:43:51.219Z",
+      "notes": "Needs tanker routing support plus field validation.",
+      "completedAt": "2026-04-24T11:43:51.219Z"
+    },
+    {
+      "id": "task_2",
+      "needId": "need_sanitation_1",
+      "title": "Waste overflow - Pimpri",
+      "type": "sanitation",
+      "locationName": "Pimpri",
+      "latitude": 18.6298,
+      "longitude": 73.7997,
+      "severity": "urgent",
+      "status": "open",
+      "requiredSkills": [
+        "logistics",
+        "community outreach"
+      ],
+      "assignedVolunteerIds": [],
+      "buddySuggestionIds": [
+        "user_volunteer_1"
+      ],
+      "sponsorCompanyId": "company_aurora",
+      "createdAt": "2026-04-24T05:31:16.505Z",
+      "updatedAt": "2026-04-24T05:31:16.505Z",
+      "notes": "Coordinate sweep crew and resident updates."
+    },
+    {
+      "id": "task_3",
+      "needId": "need_volunteer_1",
+      "title": "Volunteers needed - Kothrud kitchen",
+      "type": "volunteer",
+      "locationName": "Kothrud",
+      "latitude": 18.5074,
+      "longitude": 73.8077,
+      "severity": "stable",
+      "status": "in_progress",
+      "requiredSkills": [
+        "meal distribution",
+        "logistics"
+      ],
+      "assignedVolunteerIds": [
+        "user_volunteer_1"
+      ],
+      "buddySuggestionIds": [
+        "user_volunteer_1"
+      ],
+      "sponsorCompanyId": "company_aurora",
+      "createdAt": "2026-04-24T09:31:16.505Z",
+      "updatedAt": "2026-04-24T11:43:55.003Z",
+      "notes": "Evening shift coverage gap."
+    },
+    {
+      "id": "task_4",
+      "needId": "need_medical_1",
+      "title": "Fever cluster - Yerawada",
+      "type": "medical",
+      "locationName": "Yerawada",
+      "latitude": 18.5538,
+      "longitude": 73.8893,
+      "severity": "critical",
+      "status": "in_progress",
+      "requiredSkills": [
+        "medical",
+        "triage",
+        "marathi"
+      ],
+      "assignedVolunteerIds": [
+        "user_volunteer_2"
+      ],
+      "buddySuggestionIds": [
+        "user_volunteer_1"
+      ],
+      "sponsorCompanyId": "company_sunrise",
+      "createdAt": "2026-04-24T06:31:16.505Z",
+      "updatedAt": "2026-04-24T08:31:16.505Z",
+      "notes": "Medicine distribution and symptom logging."
+    },
+    {
+      "id": "task_5",
+      "needId": "need_food_1",
+      "title": "Ration restock - Hadapsar",
+      "type": "food",
+      "locationName": "Hadapsar",
+      "latitude": 18.5089,
+      "longitude": 73.9259,
+      "severity": "urgent",
+      "status": "completed",
+      "requiredSkills": [
+        "meal distribution",
+        "logistics"
+      ],
+      "assignedVolunteerIds": [
+        "user_volunteer_1",
+        "user_volunteer_2"
+      ],
+      "buddySuggestionIds": [],
+      "sponsorCompanyId": "company_sunrise",
+      "createdAt": "2026-04-23T05:31:16.505Z",
+      "updatedAt": "2026-04-24T03:31:16.505Z",
+      "completedAt": "2026-04-24T09:31:16.505Z",
+      "notes": "Dry ration kits delivered to 23 households."
+    }
+  ],
+  "messages": [
+    {
+      "id": "message_1",
+      "channel": "whatsapp",
+      "from": "whatsapp:+919999999999",
+      "body": "Pimpri drain overflow near market road. Need sanitation support today.",
+      "mediaUrl": null,
+      "createdAt": "2026-04-24T05:31:16.505Z"
+    }
+  ],
+  "alerts": [],
+  "corrections": []
+}

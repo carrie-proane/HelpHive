@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KindredPune | Report Needs</title>
+    <meta
+      name="description"
+      content="Upload surveys, audio notes, and manual need reports into KindredPune."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-guard="auth" data-roles="ngo_worker,admin">
+    <div class="page-shell">
+      <div class="ambient-shape one"></div>
+      <div class="ambient-shape two"></div>
+      <div class="ambient-shape three"></div>
+
+      <header class="site-header">
+        <a class="brand" href="./index.html">
+          <div class="brand-mark"></div>
+          <div class="brand-copy">
+            <strong>KindredPune</strong>
+            <span>Civic intelligence, made human</span>
+          </div>
+        </a>
+        <nav class="site-nav">
+          <a href="./index.html">Home</a>
+          <a href="./intelligence.html">Intelligence</a>
+          <a href="./community.html">Community</a>
+          <a href="./impact.html">Impact</a>
+          <a href="./join.html">Join</a>
+        </nav>
+        <div class="header-actions">
+          <span class="pill-tag">Field intake</span>
+          <a class="soft-button ghost-button" href="./intelligence.html">Open map</a>
+        </div>
+      </header>
+
+      <main>
+        <section class="page-hero fade-in">
+          <div class="page-hero-panel">
+            <div class="page-hero-grid slim">
+              <div class="page-hero-copy">
+                <span class="eyebrow">Need intake</span>
+                <h1>Bring handwritten, spoken, and manual field signals into one lane.</h1>
+                <p>
+                  This page is designed for NGO and admin users handling survey
+                  uploads, voice notes, and fast manual entries without breaking
+                  the visual rhythm of the rest of the product.
+                </p>
+              </div>
+              <div class="page-hero-visual">
+                <article class="visual-card blue">
+                  <span class="side-kicker">Pipeline</span>
+                  <ul class="timeline-list">
+                    <li><span>OCR upload</span><strong>Confidence threshold applied</strong></li>
+                    <li><span>Voice transcription</span><strong>Need type extracted</strong></li>
+                    <li><span>Review handoff</span><strong>Low-confidence items flagged</strong></li>
+                  </ul>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in">
+          <div class="sheet teal">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Upload channels</span>
+                <h2>Three intake paths, one structured output</h2>
+              </div>
+              <p>
+                OCR, voice, and manual entry all feed the same need and task models.
+              </p>
+            </div>
+
+            <div class="upload-grid">
+              <article class="dashboard-shell sand">
+                <h3>Handwritten survey OCR</h3>
+                <form class="stack-form" id="ocrUploadForm">
+                  <label class="upload-dropzone">
+                    Survey image
+                    <input type="file" name="image" accept="image/*" required />
+                  </label>
+                  <button class="cta-button" type="submit">Run OCR</button>
+                </form>
+                <div class="result-block" id="ocrResult">
+                  <p class="muted">OCR output will appear here after upload.</p>
+                </div>
+              </article>
+
+              <article class="dashboard-shell lavender">
+                <h3>Voice-to-need intake</h3>
+                <form class="stack-form" id="audioUploadForm">
+                  <label class="upload-dropzone">
+                    Audio note
+                    <input type="file" name="audio" accept="audio/*" required />
+                  </label>
+                  <button class="cta-button" type="submit">Transcribe audio</button>
+                </form>
+                <div class="result-block" id="audioResult">
+                  <p class="muted">Transcription output will appear here after upload.</p>
+                </div>
+              </article>
+
+              <article class="dashboard-shell coral">
+                <h3>Manual critical entry</h3>
+                <form class="stack-form" id="manualNeedForm">
+                  <label>
+                    Description
+                    <textarea name="description" placeholder="Describe the need, location, severity cues, and any field notes." required></textarea>
+                  </label>
+                  <button class="cta-button" type="submit">Save need</button>
+                </form>
+                <div class="result-block" id="manualResult">
+                  <p class="muted">Manual need confirmation will appear here.</p>
+                </div>
+              </article>
+
+              <article class="dashboard-shell blue">
+                <h3>What feeds review</h3>
+                <p class="muted">
+                  Any OCR or transcription result below the confidence threshold is
+                  flagged into the admin review queue. Corrections are logged so
+                  the workflow can improve over time.
+                </p>
+                <ul class="pill-list">
+                  <li>Confidence threshold: 0.8</li>
+                  <li>Human review logging enabled</li>
+                  <li>Silent-need detection runs in the background</li>
+                </ul>
+              </article>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>KindredPune intake desk</span>
+        <span>OCR, voice, and manual reporting for NGO and admin roles</span>
+      </footer>
+    </div>
+
+    <script src="./main.js"></script>
+  </body>
+</html>

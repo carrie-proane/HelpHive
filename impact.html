@@ -87,7 +87,12 @@
               </p>
             </div>
 
-            <div class="impact-grid">
+            <div id="csrAuthPrompt" class="status-banner info hidden">
+              <strong>CSR dashboard sign-in</strong>
+              <span>Log in with a CSR or admin account to open live partner metrics and download the latest receipt.</span>
+            </div>
+
+            <div class="impact-grid" id="csrMetricCards">
               <article class="metric-card">
                 <span class="panel-kicker">Needs surfaced</span>
                 <strong>12,400+</strong>
@@ -129,37 +134,32 @@
               </p>
             </div>
 
-            <div class="detail-grid">
+            <div class="split-panel">
+              <article class="chart-card">
+                <h3>Partner narrative</h3>
+                <p class="muted" id="csrNarrative">
+                  Log in as a CSR partner to see the live narrative generated from completed field work.
+                </p>
+                <div class="mini-chart" id="csrImpactChart">
+                  <span style="--bar-height: 42%;"></span>
+                  <span style="--bar-height: 58%;"></span>
+                  <span style="--bar-height: 72%;"></span>
+                  <span style="--bar-height: 48%;"></span>
+                </div>
+              </article>
+
               <article class="detail-card sand">
-                <h3>Coverage change</h3>
+                <h3>Impact receipt lane</h3>
                 <p class="muted">
-                  Sponsor support increased active ward reach and shortened the gap
-                  between signal and first response.
+                  Completed tasks linked to partner funding appear here as a ready-to-download receipt.
                 </p>
-                <strong style="font-size: 2.7rem; display: block;">+22%</strong>
-              </article>
-              <article class="detail-card blue">
-                <h3>Response improvement</h3>
-                <p class="muted">
-                  Shared visibility reduced missed handoffs and helped route crews
-                  sooner into high-pressure clusters.
-                </p>
-                <strong style="font-size: 2.7rem; display: block;">-31%</strong>
-              </article>
-              <article class="detail-card teal">
-                <h3>Volunteer reliability</h3>
-                <p class="muted">
-                  Better matching means fewer drop-offs and more completed shifts.
-                </p>
-                <strong style="font-size: 2.7rem; display: block;">78%</strong>
-              </article>
-              <article class="detail-card lavender">
-                <h3>Partner retention</h3>
-                <p class="muted">
-                  Teams keep showing up when coordination is legible and outcomes
-                  are visible.
-                </p>
-                <strong style="font-size: 2.7rem; display: block;">91%</strong>
+                <ul class="report-row" id="csrReceiptList">
+                  <li>
+                    <span>Receipt lines</span>
+                    <strong>Log in to load</strong>
+                  </li>
+                </ul>
+                <button id="downloadReceiptButton" class="cta-button hidden" type="button">Download receipt PDF</button>
               </article>
             </div>
           </div>

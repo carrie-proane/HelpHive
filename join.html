@@ -159,29 +159,40 @@
             <div class="two-column-grid">
               <article class="contact-card sand">
                 <h3>Tell us how you want to join</h3>
-                <form class="form-grid">
+                <form class="form-grid" id="joinSignupForm">
                   <label>
                     Name
-                    <input type="text" placeholder="Your name" />
+                    <input type="text" name="name" placeholder="Your name" required />
+                  </label>
+                  <label>
+                    Email
+                    <input type="email" name="email" placeholder="you@example.org" required />
+                  </label>
+                  <label>
+                    Password
+                    <input type="password" name="password" placeholder="Create a password" required />
                   </label>
                   <label>
                     Role
-                    <select>
-                      <option>NGO team</option>
-                      <option>Volunteer</option>
-                      <option>CSR / supporter</option>
-                      <option>Civic ally</option>
+                    <select name="role" required>
+                      <option value="ngo_worker">NGO worker</option>
+                      <option value="volunteer">Volunteer</option>
+                      <option value="csr_partner">CSR partner</option>
                     </select>
                   </label>
                   <label>
                     Area or ward
-                    <input type="text" placeholder="Kothrud, Shivajinagar, Pimpri..." />
+                    <input type="text" name="baseLocation" placeholder="Kothrud, Shivajinagar, Pimpri..." />
                   </label>
                   <label>
-                    How you would like to help
-                    <textarea placeholder="Tell us about your team, time, or support."></textarea>
+                    Skills or strengths
+                    <input type="text" name="skills" placeholder="medical, logistics, Marathi, outreach" />
                   </label>
-                  <button type="button" class="cta-button">Submit interest</button>
+                  <label>
+                    Availability
+                    <input type="text" name="availability" placeholder="Weekends, evenings, weekdays..." />
+                  </label>
+                  <button type="submit" class="cta-button">Create account</button>
                 </form>
               </article>
 
@@ -203,6 +214,7 @@
                     Prototype contact details are shown as visible system behavior
                     for the launch-ready experience.
                   </p>
+                  <p class="helper-copy">Already registered? <a class="text-link" href="./login.html">Log in here</a>.</p>
                 </article>
               </div>
             </div>
