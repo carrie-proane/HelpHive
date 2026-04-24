@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KindredPune | Civic Intelligence Layer</title>
+    <meta
+      name="description"
+      content="KindredPune is a civic intelligence layer for ward insights, NGO coordination, volunteer matching, and real-time action across Pune."
+    />
+    <link
+      rel="preconnect"
+      href="https://fonts.googleapis.com"
+    />
+    <link
+      rel="preconnect"
+      href="https://fonts.gstatic.com"
+      crossorigin
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="ambient-shape one"></div>
+      <div class="ambient-shape two"></div>
+      <div class="ambient-shape three"></div>
+
+      <header class="site-header">
+        <div class="brand">
+          <div class="brand-mark"></div>
+          <div class="brand-copy">
+            <strong>KindredPune</strong>
+            <span>Civic intelligence, made human</span>
+          </div>
+        </div>
+        <nav class="site-nav">
+          <a href="./index.html" class="is-active">Home</a>
+          <a href="./intelligence.html">Intelligence</a>
+          <a href="./community.html">Community</a>
+          <a href="./impact.html">Impact</a>
+          <a href="./join.html">Join</a>
+        </nav>
+        <div class="header-actions">
+          <span class="pill-tag">11 wards live</span>
+          <a class="soft-button ghost-button" href="./community.html">See field stories</a>
+        </div>
+      </header>
+
+      <main>
+        <section class="hero fade-in">
+          <div class="hero-panel">
+            <div class="hero-grid">
+              <div class="hero-copy">
+                <span class="eyebrow">Civic layer for Pune wards</span>
+                <h1>Ward intelligence, layered like a city desk.</h1>
+                <p>
+                  A shared civic layer where signals become action. KindredPune
+                  blends ward data, field voices, volunteer movement, and NGO
+                  response into a calm system that helps the city notice sooner
+                  and coordinate better.
+                </p>
+                <div class="hero-actions">
+                  <a class="cta-button" href="./join.html">Join the network</a>
+                  <a class="ghost-button" href="./intelligence.html">Explore live map</a>
+                </div>
+                <div class="hero-footnotes">
+                  <span class="pill-tag">Real-time ward cues</span>
+                  <span class="pill-tag">Volunteer matching in flow</span>
+                  <span class="pill-tag">NGO and CSR coordination</span>
+                </div>
+                <div class="hero-mini-strip">
+                  <div class="mini-stat">
+                    <span>Today’s ward pulse</span>
+                    <strong>63 fresh needs</strong>
+                  </div>
+                  <div class="mini-stat">
+                    <span>Fastest response lane</span>
+                    <strong>2h 14m cycle</strong>
+                  </div>
+                  <div class="mini-stat">
+                    <span>Volunteer readiness</span>
+                    <strong>78% matched</strong>
+                  </div>
+                </div>
+              </div>
+
+              <div class="hero-visual" aria-hidden="true">
+                <div class="illustration-panel">
+                  <img
+                    src="./46384742-0a18-4132-a450-f1b683275850.jpeg"
+                    alt="Illustrated community members linking hands"
+                  />
+                </div>
+
+                <article class="floating-card one">
+                  <span class="severity-badge critical">Critical cluster</span>
+                  <h3>Water alerts rising</h3>
+                  <div class="card-meta">
+                    <span>Shivajinagar + Kasba</span>
+                    <strong>+18%</strong>
+                  </div>
+                </article>
+
+                <article class="floating-card two">
+                  <span class="severity-badge urgent">Urgent sanitation</span>
+                  <h3>Sanitation gaps detected</h3>
+                  <div class="card-meta">
+                    <span>Pimpri line sweep delayed</span>
+                    <strong>09:10 AM</strong>
+                  </div>
+                </article>
+
+                <article class="floating-card three">
+                  <span class="severity-badge stable">Volunteer coverage</span>
+                  <h3>Volunteer coverage low</h3>
+                  <div class="card-meta">
+                    <span>Kothrud kitchens need 12</span>
+                    <strong>Match now</strong>
+                  </div>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in" id="signals">
+          <div class="sheet sand">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Data snapshot</span>
+                <h2>Quietly tracking what the city needs next</h2>
+              </div>
+              <p>
+                Not a dashboard wall. A compact pulse strip that lets the room
+                understand where civic pressure is building before action teams
+                split up across the city.
+              </p>
+            </div>
+
+            <div class="snapshot-strip">
+              <article class="snapshot-card">
+                <span>Wards under watch</span>
+                <strong>11</strong>
+                <div class="muted">Signals stitched from helplines, field visits, and ward desks.</div>
+              </article>
+              <article class="snapshot-card">
+                <span>Critical clusters</span>
+                <strong>04</strong>
+                <div class="muted">High-priority zones with visible stress across water and sanitation.</div>
+              </article>
+              <article class="snapshot-card">
+                <span>Needs reported today</span>
+                <strong>63</strong>
+                <div class="muted">New calls and community submissions entering the response lane.</div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in" id="map">
+          <div class="sheet blue">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Live Pune map</span>
+                <h2>The city, with urgency layered into view</h2>
+              </div>
+              <p>
+                Markers, heat pockets, and field context sit in one shared map so
+                coordination feels less like searching and more like seeing.
+              </p>
+            </div>
+
+            <div class="map-layout">
+              <div class="map-board">
+                <div class="filter-panel">
+                  <h3>Signal filters</h3>
+                  <div class="filter-grid">
+                    <label>
+                      Need type
+                      <select id="typeFilter">
+                        <option value="all">All needs</option>
+                        <option value="water">Water</option>
+                        <option value="sanitation">Sanitation</option>
+                        <option value="volunteer">Volunteer</option>
+                      </select>
+                    </label>
+                    <label>
+                      Severity
+                      <select id="severityFilter">
+                        <option value="all">All severities</option>
+                        <option value="critical">Critical</option>
+                        <option value="urgent">Urgent</option>
+                        <option value="stable">Stable</option>
+                      </select>
+                    </label>
+                    <label>
+                      NGO desk
+                      <select id="ngoFilter">
+                        <option value="all">All desks</option>
+                        <option value="Jeevan Dhara">Jeevan Dhara</option>
+                        <option value="Seva Setu">Seva Setu</option>
+                        <option value="Nagrik Mitra">Nagrik Mitra</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="map-legend">
+                    <span class="legend-item" style="--legend-color: #e07a6a;">Critical</span>
+                    <span class="legend-item" style="--legend-color: #e6a96a;">Urgent</span>
+                    <span class="legend-item" style="--legend-color: #6aa89e;">Stable</span>
+                  </div>
+                </div>
+                <div id="pune-map" aria-label="KindredPune live civic intelligence map"></div>
+              </div>
+
+              <aside class="map-side">
+                <article class="dashboard-preview">
+                  <span class="side-kicker">NGO desk preview</span>
+                  <h4>Morning routing board</h4>
+                  <ul>
+                    <li>
+                      <span>Water tankers reassigned</span>
+                      <strong>3 crews</strong>
+                    </li>
+                    <li>
+                      <span>Waste overflow checks</span>
+                      <strong>Pimpri ward</strong>
+                    </li>
+                    <li>
+                      <span>Ward call-backs pending</span>
+                      <strong>07 households</strong>
+                    </li>
+                  </ul>
+                </article>
+
+                <article class="match-card">
+                  <span class="side-kicker">Volunteer matching</span>
+                  <h3>Best-fit responders surfaced for Kothrud kitchen support</h3>
+                  <ul class="match-list">
+                    <li>
+                      <span>Aditya K.</span>
+                      <strong>2.1 km away</strong>
+                    </li>
+                    <li>
+                      <span>Fatima S.</span>
+                      <strong>Meal packing trained</strong>
+                    </li>
+                    <li>
+                      <span>Rohit P.</span>
+                      <strong>Available in 40 min</strong>
+                    </li>
+                  </ul>
+                </article>
+
+                <article class="report-card">
+                  <span class="side-kicker">CSR reporting</span>
+                  <h4>Quarterly support story forming in real time</h4>
+                  <div class="report-grid">
+                    <div class="report-stat">
+                      <span class="muted">Coverage gain</span>
+                      <strong>+22%</strong>
+                    </div>
+                    <div class="report-stat">
+                      <span class="muted">Resolved this month</span>
+                      <strong>318</strong>
+                    </div>
+                  </div>
+                  <div class="mini-bars" aria-hidden="true">
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                    <span></span>
+                  </div>
+                </article>
+              </aside>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in">
+          <div class="sheet lavender">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Intelligence layer</span>
+                <h2>From scattered signals to structured action</h2>
+              </div>
+              <p>
+                These panels turn field noise into pattern recognition: what is
+                getting worse, which ward needs drilldown, and how time changes
+                the shape of response.
+              </p>
+            </div>
+
+            <div class="insights-grid">
+              <article class="insight-panel">
+                <div class="panel-icon coral">01</div>
+                <h3>Severity overlays</h3>
+                <p class="muted">
+                  Coral blooms surface pressure faster than spreadsheets, making
+                  heat pockets visible before they widen.
+                </p>
+                <ul class="trend-points">
+                  <li><span>Water stress</span><strong>North-west wards</strong></li>
+                  <li><span>Waste density</span><strong>Pimpri fringe</strong></li>
+                  <li><span>Field confidence</span><strong>Strong NGO coverage</strong></li>
+                </ul>
+              </article>
+
+              <article class="insight-panel">
+                <div class="panel-icon blue">02</div>
+                <h3>Ward drilldowns</h3>
+                <p class="muted">
+                  Each ward compresses into one clear page of incidents, owners,
+                  volunteer capacity, and unresolved loops.
+                </p>
+                <ul class="trend-points">
+                  <li><span>Shivajinagar</span><strong>6 active needs</strong></li>
+                  <li><span>Kasba</span><strong>2 follow-ups due</strong></li>
+                  <li><span>Kothrud</span><strong>12 volunteers missing</strong></li>
+                </ul>
+              </article>
+
+              <article class="insight-panel">
+                <div class="panel-icon teal">03</div>
+                <h3>Time-aware trends</h3>
+                <p class="muted">
+                  Response timing is not a footnote. It shows which signals spike
+                  in mornings, stall by noon, or calm when supply routes open.
+                </p>
+                <ul class="trend-points">
+                  <li><span>6-9 AM</span><strong>Water calls peak</strong></li>
+                  <li><span>Midday</span><strong>Volunteer drop-off</strong></li>
+                  <li><span>Evening</span><strong>Sanitation backlog rises</strong></li>
+                </ul>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in" id="community">
+          <div class="sheet teal">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Who it serves</span>
+                <h2>Built for the people who keep civic work moving</h2>
+              </div>
+              <p>
+                Different roles need different layers of clarity. The system
+                stays human by shaping the same city view for action, funding,
+                and field response.
+              </p>
+            </div>
+
+            <div class="personas-grid">
+              <article class="persona-card">
+                <div class="persona-visual">
+                  <img
+                    src="./c61521ed-998b-47b5-8c15-0c967d999742.jpeg"
+                    alt="Illustrated doorway scene representing NGO worker field visits"
+                  />
+                </div>
+                <h3>NGO Worker</h3>
+                <p class="muted">
+                  Walks into the day with one clear routing layer: what is urgent,
+                  what is assigned, and which households still need a call-back.
+                </p>
+              </article>
+
+              <article class="persona-card">
+                <div class="persona-visual">
+                  <img
+                    src="./065511da-2380-4fcd-a73a-e5da2210d21a.jpeg"
+                    alt="Illustrated Pune street scene representing local civic context"
+                  />
+                </div>
+                <h3>CSR Manager</h3>
+                <p class="muted">
+                  Sees contribution turn into visible ward movement, with grounded
+                  reporting that feels like real impact instead of abstraction.
+                </p>
+              </article>
+
+              <article class="persona-card">
+                <div class="persona-visual">
+                  <img
+                    src="./69f5d231-0edc-44a4-9cfb-5147588cb6e4.jpeg"
+                    alt="Hands stacked together representing volunteers coordinating support"
+                  />
+                </div>
+                <h3>Volunteer</h3>
+                <p class="muted">
+                  Gets matched to nearby needs that fit skill, distance, and time,
+                  so help lands where it can actually make a difference.
+                </p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in">
+          <div class="sheet sand">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Voices from the field</span>
+                <h2>What coordination feels like when it finally clicks</h2>
+              </div>
+              <p>
+                Field notes are treated like evidence, not decoration. The page
+                keeps the human voice close to the data so decisions stay grounded.
+              </p>
+            </div>
+
+            <div class="story-layout">
+              <div class="field-grid">
+                <article class="note-card">
+                  <h3>“We stopped chasing scattered messages.”</h3>
+                  <p class="muted">
+                    The Shivajinagar desk now sees tanker requests, household
+                    follow-ups, and volunteer availability in one morning view.
+                  </p>
+                  <p><strong>Meera</strong> · Ward coordinator</p>
+                </article>
+
+                <article class="note-card">
+                  <h3>“The map made our blind spots visible.”</h3>
+                  <p class="muted">
+                    Sanitation overflow reports finally lined up with where our
+                    outreach teams were thinnest.
+                  </p>
+                  <p><strong>Aslam</strong> · NGO operations lead</p>
+                </article>
+
+                <article class="note-card">
+                  <h3>“I could join where I was actually needed.”</h3>
+                  <p class="muted">
+                    Volunteer matching felt less random. I got a nearby shift that
+                    fit my evening window and kitchen training.
+                  </p>
+                  <p><strong>Shravani</strong> · Community volunteer</p>
+                </article>
+              </div>
+
+              <article class="story-card">
+                <img
+                  src="./c30f5209-c1a6-451f-94f9-057d6ea11ec1.jpeg"
+                  alt="Community poster style illustration"
+                />
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in" id="impact">
+          <div class="sheet lavender impact-sheet">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Impact</span>
+                <h2>Evidence of care, visible at city scale</h2>
+              </div>
+              <p>
+                Numbers matter more when they feel attached to streets, kitchens,
+                taps, and people. This section carries that balance forward.
+              </p>
+            </div>
+
+            <div class="impact-grid">
+              <article class="metric-card">
+                <span class="panel-kicker">Needs surfaced</span>
+                <strong>12,400+</strong>
+                <p class="muted">Signals logged across ward desks, volunteer lines, and NGO partners.</p>
+                <div class="spark"></div>
+              </article>
+
+              <article class="metric-card">
+                <span class="panel-kicker">Resolved</span>
+                <strong>3,800+</strong>
+                <p class="muted">Requests closed through coordinated routing and field follow-through.</p>
+                <div class="spark"></div>
+              </article>
+
+              <article class="metric-card">
+                <span class="panel-kicker">Volunteers active</span>
+                <strong>890+</strong>
+                <p class="muted">Community responders matched with time, distance, and skill in mind.</p>
+                <div class="spark"></div>
+              </article>
+
+              <article class="metric-card">
+                <span class="panel-kicker">NGO network</span>
+                <strong>47+</strong>
+                <p class="muted">Local organizations contributing shared insight and action capacity.</p>
+                <div class="spark"></div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="cta-section fade-in">
+          <div class="cta-block">
+            <span class="eyebrow" style="background: rgba(250, 247, 242, 0.14); color: rgba(250, 247, 242, 0.84);">Final call</span>
+            <h2>Be the hand that pulls someone in.</h2>
+            <p>
+              Join the network that turns local signals into coordinated care
+              across Pune, one ward at a time.
+            </p>
+            <div class="cta-visual">
+              <img
+                src="./69f5d231-0edc-44a4-9cfb-5147588cb6e4.jpeg"
+                alt="Hands joined together"
+              />
+            </div>
+            <a class="cta-button" href="./join.html">Join the network</a>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>KindredPune homepage · civic storytelling + intelligence layer</span>
+        <span>Explore the full system across intelligence, community, impact, and join pages</span>
+      </footer>
+    </div>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="./main.js"></script>
+  </body>
+</html>
