@@ -93,6 +93,29 @@
               <span>Log in with a CSR or admin account to open live partner metrics and download the latest receipt.</span>
             </div>
 
+            <div id="csrLoadingState" class="status-banner info hidden">
+              <strong>Loading CSR dashboard</strong>
+              <span>Pulling company metrics, task receipts, and reporting history.</span>
+            </div>
+
+            <article class="dashboard-shell sand">
+              <form id="csrFilterForm" class="form-grid">
+                <label>
+                  Company
+                  <select id="csrCompanyFilter" name="companyId"></select>
+                </label>
+                <label>
+                  Start date
+                  <input id="csrStartDate" name="startDate" type="date" />
+                </label>
+                <label>
+                  End date
+                  <input id="csrEndDate" name="endDate" type="date" />
+                </label>
+                <button class="ghost-button" type="submit">Apply range</button>
+              </form>
+            </article>
+
             <div class="impact-grid" id="csrMetricCards">
               <article class="metric-card">
                 <span class="panel-kicker">Needs surfaced</span>
@@ -141,11 +164,10 @@
                 <p class="muted" id="csrNarrative">
                   Log in as a CSR partner to see the live narrative generated from completed field work.
                 </p>
-                <div class="mini-chart" id="csrImpactChart">
-                  <span style="--bar-height: 42%;"></span>
-                  <span style="--bar-height: 58%;"></span>
-                  <span style="--bar-height: 72%;"></span>
-                  <span style="--bar-height: 48%;"></span>
+                <div id="csrImpactChart" class="csr-chart-panel">
+                  <div class="chart-placeholder">
+                    Volunteer-hour trend will appear here once the dashboard finishes loading.
+                  </div>
                 </div>
               </article>
 
@@ -160,7 +182,7 @@
                     <strong>Log in to load</strong>
                   </li>
                 </ul>
-                <button id="downloadReceiptButton" class="cta-button hidden" type="button">Download receipt PDF</button>
+                <button id="downloadReceiptButton" class="cta-button hidden" type="button">Export report</button>
               </article>
             </div>
           </div>

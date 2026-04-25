@@ -6,17 +6,18 @@ const fallbackSeverityColors = {
 
 const roleLabels = {
   volunteer: "Volunteer",
-  ngo_worker: "NGO Worker",
+  ngo: "NGO Worker",
   admin: "Admin",
-  csr_partner: "CSR Partner"
+  corporate: "Corporate"
 };
 
 const roleHomes = {
   volunteer: "./intelligence.html",
-  ngo_worker: "./report.html",
+  ngo: "./report.html",
   admin: "./admin.html",
-  csr_partner: "./impact.html"
+  corporate: "./impact.html"
 };
+
 
 function hexToRgba(hex, alpha) {
   const value = hex.replace("#", "");
@@ -43,6 +44,26 @@ function getSeverityColors() {
 
 function capitalize(value = "") {
   return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function buildQueryString(values = {}) {
+  const params = new URLSearchParams();
+  Object.entries(values).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, value);
+    }
+  });
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+function formatAgeHours(updatedAt) {
+  const timestamp = new Date(updatedAt);
+  if (Number.isNaN(timestamp.getTime())) {
+    return 0;
+  }
+
+  return Math.max((Date.now() - timestamp.getTime()) / (1000 * 60 * 60), 0);
 }
 
 function getToken() {
@@ -259,17 +280,17 @@ function renderHeaderActions(currentUser) {
     const label =
       currentUser.role === "admin"
         ? "Admin"
-        : currentUser.role === "ngo_worker"
+        : currentUser.role === "ngo"
           ? "Report Needs"
-          : currentUser.role === "csr_partner"
+          : currentUser.role === "corporate"
             ? "CSR Dashboard"
             : "My Tasks";
     const href =
       currentUser.role === "admin"
         ? "./admin.html"
-        : currentUser.role === "ngo_worker"
+        : currentUser.role === "ngo"
           ? "./report.html"
-          : currentUser.role === "csr_partner"
+          : currentUser.role === "corporate"
             ? "./impact.html"
             : "./intelligence.html";
     const link = document.createElement("a");
@@ -331,7 +352,7 @@ function taskActionButtons(task, currentUser) {
   const canVolunteer = currentUser.role === "volunteer" || currentUser.role === "admin";
   const canComplete =
     currentUser.role === "admin" ||
-    currentUser.role === "ngo_worker" ||
+    currentUser.role === "ngo" ||
     isAssigned;
 
   const actions = [];
@@ -408,6 +429,11 @@ async function setupMap(mapElementId, filterPrefix = "") {
   const heatLayer = L.layerGroup().addTo(map);
   let issues = [];
   let alerts = [];
+  const token = getToken();
+
+  if (!token) {
+    return { refreshData: async () => {} };
+  }
 
   function getField(id) {
     return document.getElementById(`${filterPrefix}${id}`);
@@ -432,10 +458,15 @@ async function setupMap(mapElementId, filterPrefix = "") {
     const visibleIssues = filteredIssues();
 
     visibleIssues.forEach((issue) => {
+      const ageHours = formatAgeHours(issue.updated_at);
+      const decay = Math.exp(-0.12 * ageHours);
       const color = severityColors[issue.severity] || severityColors.stable;
-      const intensity = Math.max(issue.currentIntensity || 0.3, 0.18);
-      const outerRadius = 700 + intensity * 1500;
-      const innerRadius = 280 + intensity * 760;
+      const severityRadius =
+        issue.severity === "critical" ? 2200 : issue.severity === "urgent" ? 1600 : 1100;
+      const intensity = Math.max(decay, 0.15);
+      const outerRadius = severityRadius + intensity * 900;
+      const innerRadius = severityRadius * 0.45 + intensity * 420;
+      issue.currentIntensity = Number(intensity.toFixed(2));
 
       createMarker(issue).addTo(markerLayer);
 
@@ -444,7 +475,7 @@ async function setupMap(mapElementId, filterPrefix = "") {
         color,
         weight: 1,
         fillColor: color,
-        fillOpacity: Math.min(0.08 + intensity * 0.24, 0.3)
+        fillOpacity: Math.min(0.06 + intensity * 0.28, 0.34)
       }).addTo(heatLayer);
 
       L.circle([issue.lat, issue.lng], {
@@ -452,7 +483,7 @@ async function setupMap(mapElementId, filterPrefix = "") {
         color,
         weight: 0,
         fillColor: color,
-        fillOpacity: Math.min(0.12 + intensity * 0.28, 0.36)
+        fillOpacity: Math.min(0.14 + intensity * 0.3, 0.42)
       }).addTo(heatLayer);
     });
 
@@ -484,12 +515,14 @@ async function setupMap(mapElementId, filterPrefix = "") {
 
   async function refreshData() {
     try {
-      const data = await apiFetch("/api/issues", { auth: false });
+      const data = await apiFetch("/api/issues");
       issues = data.issues || [];
       alerts = data.alerts || [];
       drawLayers();
     } catch (error) {
-      showGlobalBanner(error.message || "Could not load map data.", "error");
+      if (error.message !== "Authentication required.") {
+        showGlobalBanner(error.message || "Could not load map data.", "error");
+      }
     }
   }
 
@@ -501,18 +534,18 @@ async function setupMap(mapElementId, filterPrefix = "") {
   });
 
   await refreshData();
-  window.setInterval(refreshData, 90 * 1000);
+  window.setInterval(refreshData, 60 * 1000);
   return { refreshData };
 }
 
 async function initHomePage() {
   const overviewTargets = document.querySelectorAll("[data-overview-key]");
-  if (!overviewTargets.length) {
+  if (!overviewTargets.length || !getToken()) {
     return;
   }
 
   try {
-    const data = await apiFetch("/api/overview", { auth: false });
+    const data = await apiFetch("/api/overview");
     overviewTargets.forEach((node) => {
       const key = node.dataset.overviewKey;
       if (data[key] !== undefined) {
@@ -538,9 +571,9 @@ async function initIntelligencePage(currentUser) {
   async function refreshTasks() {
     try {
       const [taskData, alertData, overview] = await Promise.all([
-        apiFetch("/api/tasks", { auth: false }),
-        apiFetch("/api/alerts", { auth: false }),
-        apiFetch("/api/overview", { auth: false })
+        apiFetch("/api/tasks"),
+        apiFetch("/api/alerts"),
+        apiFetch("/api/overview")
       ]);
 
       const tasks = taskData.tasks || [];
@@ -645,50 +678,106 @@ async function initIntelligencePage(currentUser) {
 async function initImpactPage(currentUser) {
   const metricCards = document.getElementById("csrMetricCards");
   const narrative = document.getElementById("csrNarrative");
-  const chart = document.getElementById("csrImpactChart");
+  const chartPanel = document.getElementById("csrImpactChart");
   const receiptList = document.getElementById("csrReceiptList");
   const receiptButton = document.getElementById("downloadReceiptButton");
   const authPrompt = document.getElementById("csrAuthPrompt");
+  const loadingState = document.getElementById("csrLoadingState");
+  const filterForm = document.getElementById("csrFilterForm");
+  const companyField = document.getElementById("csrCompanyFilter");
+  const startDateField = document.getElementById("csrStartDate");
+  const endDateField = document.getElementById("csrEndDate");
 
-  if (!metricCards && !chart && !receiptList) {
+  if (!metricCards && !chartPanel && !receiptList) {
     return;
   }
 
-  if (!currentUser || !["csr_partner", "admin"].includes(currentUser.role)) {
+  if (!currentUser || !["corporate", "admin"].includes(currentUser.role)) {
     if (authPrompt) {
       authPrompt.classList.remove("hidden");
     }
     return;
   }
 
-  try {
-    const report = await apiFetch("/api/csr-report");
+  function setLoadingState(isLoading, message = "") {
+    if (loadingState) {
+      loadingState.classList.toggle("hidden", !isLoading);
+      if (message) {
+        const detail = loadingState.querySelector("span");
+        if (detail) {
+          detail.textContent = message;
+        }
+      }
+    }
+
+    if (filterForm) {
+      const controls = filterForm.querySelectorAll("button, select, input");
+      controls.forEach((control) => {
+        control.disabled = isLoading;
+      });
+    }
+
+    if (receiptButton) {
+      receiptButton.disabled = isLoading;
+    }
+  }
+
+  async function loadCompanies() {
+    if (!companyField) {
+      return;
+    }
+
+    const result = await apiFetch("/api/companies");
+    const companies = result.companies || [];
+    if (!companies.length) {
+      companyField.innerHTML = "";
+      throw new Error("No company is linked to this CSR account yet.");
+    }
+    companyField.innerHTML = companies
+      .map(
+        (company) => `<option value="${company.id}" ${
+          company.id === currentUser.companyId ? "selected" : ""
+        }>${company.name}</option>`
+      )
+      .join("");
+  }
+
+  function hydrateCompanyFieldFromSession() {
+    if (!companyField || currentUser.role !== "corporate") {
+      return;
+    }
+
+    const fallbackName = currentUser.companyName || "Linked company";
+    companyField.innerHTML = `<option value="${currentUser.companyId || ""}">${fallbackName}</option>`;
+  }
+
+  function renderMetrics(report) {
     const totals = report.totals || {};
 
     if (metricCards) {
       metricCards.innerHTML = `
         <article class="metric-card">
+          <span class="panel-kicker">Volunteer hours</span>
+          <strong>${totals.volunteerHours || 0}</strong>
+          <p class="muted">Logged through ${report.company.name} contributions and field work.</p>
+          <div class="spark"></div>
+        </article>
+        <article class="metric-card">
           <span class="panel-kicker">Tasks funded</span>
           <strong>${totals.tasksFunded || 0}</strong>
-          <p class="muted">Completed tasks attached to ${report.company.name}.</p>
+          <p class="muted">Completed task flows linked to this partner.</p>
           <div class="spark"></div>
         </article>
         <article class="metric-card">
-          <span class="panel-kicker">Communities helped</span>
-          <strong>${totals.communitiesHelped || 0}</strong>
-          <p class="muted">Estimated neighborhood touchpoints across funded work.</p>
+          <span class="panel-kicker">People served</span>
+          <strong>${totals.peopleServed || 0}</strong>
+          <p class="muted">Estimated direct reach across funded interventions.</p>
           <div class="spark"></div>
         </article>
         <article class="metric-card">
-          <span class="panel-kicker">Volunteers engaged</span>
-          <strong>${totals.volunteersEngaged || 0}</strong>
-          <p class="muted">Distinct volunteers pulled into funded task lanes.</p>
-          <div class="spark"></div>
-        </article>
-        <article class="metric-card">
-          <span class="panel-kicker">Resources moved</span>
-          <strong>${totals.resourcesMoved || 0}</strong>
-          <p class="muted">Supplies, deliveries, and linked support actions.</p>
+          <span class="panel-kicker">Funds tracked</span>
+          <strong>₹${Number(totals.funds || 0).toLocaleString("en-IN")}</strong>
+          <p class="muted">Contribution volume tied to operational reporting.</p>
           <div class="spark"></div>
         </article>
       `;
@@ -698,40 +787,139 @@ async function initImpactPage(currentUser) {
       narrative.textContent = report.narrative;
     }
 
-    if (chart) {
-      const entries = Object.entries(report.categories || {});
-      chart.innerHTML = entries.length
-        ? entries
-            .map(
-              ([category, value]) =>
-                `<span style="--bar-height:${Math.max(24, value * 22)}%;" title="${capitalize(category)}: ${value}"></span>`
-            )
-            .join("")
-        : `<span style="--bar-height:28%;"></span>`;
-    }
-
     if (receiptList) {
-      receiptList.innerHTML = (report.receiptLines || []).length
-        ? report.receiptLines
+      const combinedRows = [
+        ...(report.receiptLines || []).map((line) => ({
+          title: line.title,
+          meta: `${line.locationName} · ${line.volunteers} volunteers`
+        })),
+        ...(report.recentReports || []).map((item) => ({
+          title: "Previous export",
+          meta: new Date(item.generatedAt).toLocaleString("en-IN")
+        }))
+      ];
+
+      receiptList.innerHTML = combinedRows.length
+        ? combinedRows
             .map(
               (line) => `
                 <li>
                   <span>${line.title}</span>
-                  <strong>${line.locationName} · ${line.volunteers} volunteers</strong>
+                  <strong>${line.meta}</strong>
                 </li>
               `
             )
             .join("")
         : `<li><span>No receipt lines yet</span><strong>Waiting on completed tasks</strong></li>`;
     }
+  }
+
+  function renderImpactChart(report) {
+    if (!chartPanel) {
+      return;
+    }
+
+    const series = report.monthlyHours || [];
+    if (!series.length) {
+      chartPanel.innerHTML = `
+        <div class="chart-placeholder">
+          No monthly volunteer-hour data is available for the selected range yet.
+        </div>
+      `;
+      return;
+    }
+
+    chartPanel.innerHTML = `
+      <div class="csr-chart-grid">
+        ${series
+          .map(
+            (entry) => `
+              <div class="csr-chart-bar">
+                <div class="csr-chart-track">
+                  <div class="csr-chart-fill" style="height: ${Math.max(entry.height || 0, 18)}%;"></div>
+                </div>
+                <div class="csr-chart-label">${entry.month}</div>
+                <div class="csr-chart-value">${entry.hours} hrs</div>
+              </div>
+            `
+          )
+          .join("")}
+      </div>
+    `;
+  }
+
+  async function loadReport() {
+    const selectedCompanyId = companyField?.value || currentUser.companyId || "";
+    if (!selectedCompanyId && currentUser.role === "admin") {
+      throw new Error("Choose a company to load the CSR dashboard.");
+    }
+
+    const filters = {
+      startDate: startDateField?.value || "",
+      endDate: endDateField?.value || ""
+    };
+    const queryString = buildQueryString(filters);
+    const report =
+      selectedCompanyId && currentUser.role === "admin"
+        ? await apiFetch(`/api/companies/${selectedCompanyId}/csr-stats${queryString}`)
+        : await apiFetch(`/api/csr-report${queryString}`);
+    renderMetrics(report);
+    renderImpactChart(report);
 
     if (receiptButton) {
       receiptButton.classList.remove("hidden");
-      receiptButton.addEventListener("click", () => {
-        window.open(`/api/csr-report/${report.company.id}/receipt`, "_blank");
+      receiptButton.onclick = async () => {
+        try {
+          setLoadingState(true, "Generating the branded PDF report.");
+          const generated = await apiFetch(`/api/companies/${report.company.id}/report`, {
+            method: "POST",
+            body: filters
+          });
+          window.open(generated.downloadUrl, "_blank");
+          showGlobalBanner("CSR report exported.", "success");
+        } catch (error) {
+          showGlobalBanner(error.message || "Could not export the CSR report.", "error");
+        } finally {
+          setLoadingState(false);
+        }
+      };
+    }
+  }
+
+  try {
+    setLoadingState(true);
+    hydrateCompanyFieldFromSession();
+    if (currentUser.role === "admin") {
+      await loadCompanies();
+    } else {
+      void loadCompanies().catch(() => {});
+    }
+    await loadReport();
+    setLoadingState(false);
+
+    if (filterForm) {
+      filterForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        try {
+          setLoadingState(true, "Refreshing the CSR metrics for the selected range.");
+          await loadReport();
+          showGlobalBanner("CSR metrics updated for the selected date range.", "success");
+        } catch (error) {
+          showGlobalBanner(error.message || "Could not load the CSR dashboard.", "error");
+        } finally {
+          setLoadingState(false);
+        }
       });
     }
   } catch (error) {
+    setLoadingState(false);
+    if (chartPanel) {
+      chartPanel.innerHTML = `
+        <div class="chart-placeholder">
+          CSR data could not be loaded yet. Try refreshing after confirming the linked company account.
+        </div>
+      `;
+    }
     showGlobalBanner(error.message || "Could not load the CSR dashboard.", "error");
   }
 }
@@ -887,9 +1075,14 @@ async function initReportPage() {
   const ocrForm = document.getElementById("ocrUploadForm");
   const audioForm = document.getElementById("audioUploadForm");
   const manualForm = document.getElementById("manualNeedForm");
+  const recorderButton = document.getElementById("voiceRecorderButton");
+  const voicePreview = document.getElementById("voicePreview");
   const ocrResult = document.getElementById("ocrResult");
   const audioResult = document.getElementById("audioResult");
   const manualResult = document.getElementById("manualResult");
+  let mediaRecorder = null;
+  let recordedAudioBlob = null;
+  let recordedChunks = [];
 
   if (!ocrForm && !audioForm && !manualForm) {
     return;
@@ -901,7 +1094,7 @@ async function initReportPage() {
       const formData = new FormData(ocrForm);
 
       try {
-        const result = await apiFetch("/api/ocr-upload", {
+        const result = await apiFetch("/api/surveys", {
           method: "POST",
           body: formData
         });
@@ -921,13 +1114,57 @@ async function initReportPage() {
     });
   }
 
+  if (recorderButton && typeof MediaRecorder !== "undefined" && navigator.mediaDevices) {
+    recorderButton.addEventListener("click", async () => {
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        recorderButton.textContent = "Record voice note";
+        return;
+      }
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(stream);
+        mediaRecorder.addEventListener("dataavailable", (event) => {
+          if (event.data.size > 0) {
+            recordedChunks.push(event.data);
+          }
+        });
+        mediaRecorder.addEventListener("stop", () => {
+          recordedAudioBlob = new Blob(recordedChunks, { type: "audio/webm" });
+          if (voicePreview) {
+            voicePreview.src = URL.createObjectURL(recordedAudioBlob);
+            voicePreview.classList.remove("hidden");
+          }
+          stream.getTracks().forEach((track) => track.stop());
+        });
+        mediaRecorder.start();
+        recorderButton.textContent = "Stop recording";
+      } catch (error) {
+        showGlobalBanner("Microphone access was blocked.", "error");
+      }
+    });
+  } else if (recorderButton) {
+    recorderButton.classList.add("hidden");
+  }
+
   if (audioForm) {
     audioForm.addEventListener("submit", async (event) => {
       event.preventDefault();
       const formData = new FormData(audioForm);
 
+      if (!formData.get("audio")?.size && recordedAudioBlob) {
+        formData.set("audio", recordedAudioBlob, "voice-note.webm");
+      }
+
+      if (!formData.get("audio")?.size) {
+        showGlobalBanner("Please upload an audio file or record a voice note first.", "error");
+        return;
+      }
+
       try {
-        const result = await apiFetch("/api/audio-upload", {
+        const result = await apiFetch("/api/voice", {
           method: "POST",
           body: formData
         });
@@ -941,6 +1178,11 @@ async function initReportPage() {
         }
         showGlobalBanner("Audio report transcribed and routed.", "success");
         audioForm.reset();
+        recordedAudioBlob = null;
+        if (voicePreview) {
+          voicePreview.src = "";
+          voicePreview.classList.add("hidden");
+        }
       } catch (error) {
         showGlobalBanner(error.message || "Audio upload failed.", "error");
       }

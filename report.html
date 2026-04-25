@@ -16,7 +16,7 @@
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body data-guard="auth" data-roles="ngo_worker,admin">
+  <body data-guard="auth" data-roles="ngo,admin">
     <div class="page-shell">
       <div class="ambient-shape one"></div>
       <div class="ambient-shape two"></div>
@@ -102,8 +102,11 @@
                 <form class="stack-form" id="audioUploadForm">
                   <label class="upload-dropzone">
                     Audio note
-                    <input type="file" name="audio" accept="audio/*" required />
+                    <input type="file" name="audio" accept="audio/*" />
                   </label>
+                  <button class="ghost-button" id="voiceRecorderButton" type="button">Record voice note</button>
+                  <audio id="voicePreview" class="voice-preview hidden" controls></audio>
+                  <p class="helper-copy">You can upload a file or record directly in the browser.</p>
                   <button class="cta-button" type="submit">Transcribe audio</button>
                 </form>
                 <div class="result-block" id="audioResult">

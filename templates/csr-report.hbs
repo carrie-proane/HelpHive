@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>{{company.name}} Impact Report</title>
+    <style>
+      :root {
+        --coral: #e07a6a;
+        --teal: #6aa89e;
+        --sand: #f2e6d8;
+        --charcoal: #2b2b2b;
+        --off-white: #faf7f2;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        padding: 34px;
+        font-family: "Manrope", Arial, sans-serif;
+        color: var(--charcoal);
+        background: linear-gradient(180deg, #f8f2ea 0%, #f6ecdf 100%);
+      }
+
+      .brand-row {
+        display: flex;
+        align-items: center;
+        gap: 14px;
+        margin-bottom: 18px;
+      }
+
+      .brand-mark {
+        width: 52px;
+        height: 52px;
+        border-radius: 18px;
+        background: linear-gradient(135deg, rgba(224, 122, 106, 0.96), rgba(106, 168, 158, 0.86));
+        position: relative;
+      }
+
+      .brand-mark::before {
+        content: "";
+        position: absolute;
+        inset: 15px;
+        border-radius: 999px;
+        background: rgba(250, 247, 242, 0.92);
+        box-shadow: 12px 6px 0 -5px rgba(250, 247, 242, 0.84), -10px 7px 0 -6px rgba(250, 247, 242, 0.72);
+      }
+
+      .brand-copy strong,
+      .brand-copy span {
+        display: block;
+      }
+
+      .brand-copy span {
+        color: rgba(250, 247, 242, 0.8);
+        margin-top: 4px;
+      }
+
+      .hero {
+        padding: 28px 32px;
+        border-radius: 28px;
+        background: linear-gradient(135deg, rgba(224, 122, 106, 0.94), rgba(94, 59, 52, 0.96));
+        color: var(--off-white);
+      }
+
+      .hero h1,
+      .section h2 {
+        margin: 0;
+        font-family: "Georgia", serif;
+        letter-spacing: -0.04em;
+      }
+
+      .hero p {
+        margin: 14px 0 0;
+        max-width: 700px;
+        line-height: 1.65;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+        margin-top: 24px;
+      }
+
+      .card,
+      .story,
+      .line-item {
+        border-radius: 24px;
+        padding: 20px;
+        background: rgba(250, 247, 242, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.65);
+      }
+
+      .card strong {
+        display: block;
+        font-size: 28px;
+        margin-top: 10px;
+      }
+
+      .section {
+        margin-top: 28px;
+      }
+
+      .section p {
+        line-height: 1.7;
+      }
+
+      .chart-row {
+        display: grid;
+        grid-template-columns: 1.1fr 0.9fr;
+        gap: 18px;
+      }
+
+      .bars {
+        display: flex;
+        align-items: end;
+        gap: 12px;
+        min-height: 210px;
+        margin-top: 20px;
+      }
+
+      .bar {
+        flex: 1;
+        padding-top: 8px;
+      }
+
+      .bar-track {
+        height: 180px;
+        display: flex;
+        align-items: end;
+      }
+
+      .bar-fill {
+        width: 100%;
+        border-radius: 16px 16px 10px 10px;
+        background: linear-gradient(180deg, rgba(94, 59, 52, 0.92), rgba(224, 122, 106, 0.64));
+      }
+
+      .bar span,
+      .bar small,
+      .line-item small {
+        display: block;
+        margin-top: 10px;
+        color: rgba(43, 43, 43, 0.72);
+      }
+
+      .line-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .line-item strong {
+        display: block;
+        font-size: 18px;
+        margin-bottom: 6px;
+      }
+
+      .footer {
+        margin-top: 30px;
+        color: rgba(43, 43, 43, 0.62);
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <section class="hero">
+      <div class="brand-row">
+        <div class="brand-mark"></div>
+        <div class="brand-copy">
+          <strong>KindredPune</strong>
+          <span>Branded civic coordination reporting</span>
+        </div>
+      </div>
+      <h1>{{company.name}} Impact Report</h1>
+      <p>{{narrative}}</p>
+      <p>Generated on {{generatedAt}}</p>
+    </section>
+
+    <section class="section">
+      <div class="grid">
+        {{#each metricCards}}
+          <article class="card">
+            <span>{{label}}</span>
+            <strong>{{value}}</strong>
+            <p>{{description}}</p>
+          </article>
+        {{/each}}
+      </div>
+    </section>
+
+    <section class="section chart-row">
+      <article class="story">
+        <h2>Monthly Volunteer Hours</h2>
+        <div class="bars">
+          {{#each monthlyHours}}
+            <div class="bar">
+              <div class="bar-track">
+                <div class="bar-fill" style="height: {{height}}%;"></div>
+              </div>
+              <small>{{month}}</small>
+              <span>{{hours}} hrs</span>
+            </div>
+          {{/each}}
+        </div>
+      </article>
+
+      <article class="story">
+        <h2>Completed Task Receipt</h2>
+        <div class="line-list">
+          {{#each receiptLines}}
+            <div class="line-item">
+              <strong>{{title}}</strong>
+              <small>{{locationName}} · {{volunteers}} volunteers · {{completedAt}}</small>
+            </div>
+          {{/each}}
+        </div>
+      </article>
+    </section>
+
+    <section class="section">
+      <article class="story">
+        <h2>Category Breakdown</h2>
+        <p>
+          {{#each categorySummary}}
+            {{label}}: {{value}}{{#unless @last}}, {{/unless}}
+          {{/each}}
+        </p>
+      </article>
+    </section>
+
+    <div class="footer">
+      KindredPune civic coordination platform · This report translates funding and volunteer support into ward-level evidence.
+    </div>
+  </body>
+</html>
