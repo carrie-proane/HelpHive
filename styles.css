@@ -2815,6 +2815,71 @@ textarea {
   text-underline-offset: 3px;
 }
 
+.chart-placeholder {
+  margin-top: 20px;
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  padding: 24px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px dashed rgba(43, 43, 43, 0.14);
+  color: rgba(43, 43, 43, 0.62);
+}
+
+.csr-chart-panel {
+  margin-top: 20px;
+  min-height: 220px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.22);
+  padding: 18px;
+}
+
+.csr-chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(70px, 1fr));
+  gap: 14px;
+  align-items: end;
+  min-height: 184px;
+}
+
+.csr-chart-bar {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+}
+
+.csr-chart-track {
+  height: 150px;
+  display: flex;
+  align-items: end;
+}
+
+.csr-chart-fill {
+  width: 100%;
+  border-radius: 18px 18px 10px 10px;
+  background: linear-gradient(180deg, rgba(224, 122, 106, 0.84), rgba(106, 168, 158, 0.72));
+  min-height: 18px;
+  transition: height 220ms ease;
+}
+
+.csr-chart-label,
+.csr-chart-value {
+  text-align: center;
+  color: rgba(43, 43, 43, 0.68);
+}
+
+.csr-chart-value {
+  font-weight: 700;
+  color: rgba(43, 43, 43, 0.86);
+}
+
+.voice-preview {
+  width: 100%;
+  margin-top: 6px;
+}
+
 @media (max-width: 1080px) {
   .site-header {
     border-radius: 28px;
