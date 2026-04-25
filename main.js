@@ -1,4 +1,4 @@
-const severityColors = {
+const fallbackSeverityColors = {
   critical: "#e07a6a",
   urgent: "#e6a96a",
   stable: "#6aa89e"
@@ -25,6 +25,20 @@ function hexToRgba(hex, alpha) {
   const g = (bigint >> 8) & 255;
   const b = bigint & 255;
   return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function getThemeColor(variableName, fallback) {
+  const styles = getComputedStyle(document.body || document.documentElement);
+  const value = styles.getPropertyValue(variableName).trim();
+  return value || fallback;
+}
+
+function getSeverityColors() {
+  return {
+    critical: getThemeColor("--severity-critical", fallbackSeverityColors.critical),
+    urgent: getThemeColor("--severity-urgent", fallbackSeverityColors.urgent),
+    stable: getThemeColor("--severity-stable", fallbackSeverityColors.stable)
+  };
 }
 
 function capitalize(value = "") {
@@ -153,6 +167,7 @@ function initFadeIn() {
 }
 
 function createMarker(issue) {
+  const severityColors = getSeverityColors();
   const color = severityColors[issue.severity] || severityColors.stable;
   const icon = L.divIcon({
     className: "",
@@ -410,6 +425,7 @@ async function setupMap(mapElementId, filterPrefix = "") {
   }
 
   function drawLayers() {
+    const severityColors = getSeverityColors();
     markerLayer.clearLayers();
     heatLayer.clearLayers();
 

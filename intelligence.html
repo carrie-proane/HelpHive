@@ -22,7 +22,7 @@
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
+  <body data-theme="intelligence">
     <div class="page-shell">
       <div class="ambient-shape one"></div>
       <div class="ambient-shape two"></div>
@@ -82,7 +82,7 @@
               </div>
 
               <div class="page-hero-visual">
-                <article class="visual-card coral">
+                <article class="visual-card blue">
                   <span class="side-kicker">City desk</span>
                   <h3>Morning shift pulse</h3>
                   <p class="muted">
@@ -156,9 +156,9 @@
                     </label>
                   </div>
                   <div class="map-legend">
-                    <span class="legend-item" style="--legend-color: #e07a6a;">Critical</span>
-                    <span class="legend-item" style="--legend-color: #e6a96a;">Urgent</span>
-                    <span class="legend-item" style="--legend-color: #6aa89e;">Stable</span>
+                    <span class="legend-item" style="--legend-color: var(--severity-critical);">Critical</span>
+                    <span class="legend-item" style="--legend-color: var(--severity-urgent);">Urgent</span>
+                    <span class="legend-item" style="--legend-color: var(--severity-stable);">Stable</span>
                   </div>
                 </div>
                 <div id="intelligence-map" aria-label="KindredPune intelligence map"></div>
@@ -338,7 +338,7 @@
 
         <section class="cta-section fade-in">
           <div class="cta-block">
-            <span class="eyebrow" style="background: rgba(250, 247, 242, 0.14); color: rgba(250, 247, 242, 0.84);">Next layer</span>
+            <span class="eyebrow">Next layer</span>
             <h2>Intelligence works best when the network feels close.</h2>
             <p>
               The map explains pressure. The community pages explain the people
