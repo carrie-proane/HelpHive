@@ -46,6 +46,14 @@ function capitalize(value = "") {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+function prettyLabel(value = "") {
+  return String(value || "")
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
 function buildQueryString(values = {}) {
   const params = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => {
@@ -379,6 +387,29 @@ function taskActionButtons(task, currentUser) {
 function renderTaskCard(task, currentUser) {
   const assignedNames = (task.assignedUsers || []).map((user) => user.name).join(", ");
   const buddyNames = (task.buddySuggestions || []).map((user) => user.name).join(", ");
+  const safetyLine = task.requiresBuddy
+    ? `Buddy required · target team size ${task.recommendedTeamSize || 2}`
+    : "Solo-safe assignment allowed";
+  const languageLine = (task.preferredLanguages || []).length
+    ? `Preferred languages: ${(task.preferredLanguages || []).join(", ")}`
+    : "";
+  const complementaryLine = (task.complementarySkills || []).length
+    ? `Complementary skills: ${(task.complementarySkills || []).map(prettyLabel).join(", ")}`
+    : "";
+  const contextLine = (task.contextTags || []).length
+    ? `Context: ${(task.contextTags || []).slice(0, 3).map(prettyLabel).join(", ")}`
+    : "";
+  const communicationLine = (task.preferredCommunicationStyles || []).length
+    ? `Field style: ${(task.preferredCommunicationStyles || []).map(prettyLabel).join(", ")}`
+    : "";
+  const trainingLine =
+    task.minimumMedicalTraining && task.minimumMedicalTraining !== "none"
+      ? `Medical threshold: ${prettyLabel(task.minimumMedicalTraining)}`
+      : "";
+  const matchLine =
+    currentUser?.role === "volunteer" && task.currentUserMatch?.reasons?.length
+      ? `Why this fits you: ${task.currentUserMatch.reasons.slice(0, 3).join(" · ")}`
+      : "";
 
   return `
     <article class="task-card">
@@ -386,10 +417,10 @@ function renderTaskCard(task, currentUser) {
       <h3>${task.title}</h3>
       <p class="muted">${task.notes || "Live task routed from the need intake lane."}</p>
       <ul class="task-tags">
-        ${(task.requiredSkills || []).map((skill) => `<li>${skill}</li>`).join("")}
+        ${(task.requiredSkills || []).map((skill) => `<li>${prettyLabel(skill)}</li>`).join("")}
       </ul>
       <div class="task-meta-row">
-        <span>${task.locationName}</span>
+        <span>${task.locationName} · ${prettyLabel(task.category || task.type)}</span>
         <strong>${task.distanceKm ? `${task.distanceKm} km away` : capitalize(task.status)}</strong>
       </div>
       ${
@@ -397,6 +428,13 @@ function renderTaskCard(task, currentUser) {
           ? `<p class="helper-copy">Assigned: ${assignedNames}</p>`
           : `<p class="helper-copy">No volunteers assigned yet.</p>`
       }
+      <p class="helper-copy">${safetyLine}</p>
+      ${languageLine ? `<p class="helper-copy">${languageLine}</p>` : ""}
+      ${trainingLine ? `<p class="helper-copy">${trainingLine}</p>` : ""}
+      ${complementaryLine ? `<p class="helper-copy">${complementaryLine}</p>` : ""}
+      ${communicationLine ? `<p class="helper-copy">${communicationLine}</p>` : ""}
+      ${contextLine ? `<p class="helper-copy">${contextLine}</p>` : ""}
+      ${matchLine ? `<p class="helper-copy">${matchLine}</p>` : ""}
       ${
         buddyNames
           ? `<p class="helper-copy">Buddy suggestion: ${buddyNames}</p>`
@@ -459,7 +497,7 @@ async function setupMap(mapElementId, filterPrefix = "") {
 
     visibleIssues.forEach((issue) => {
       const ageHours = formatAgeHours(issue.updated_at);
-      const decay = Math.exp(-0.12 * ageHours);
+      const decay = issue.heatWeight || Math.exp(-0.12 * ageHours);
       const color = severityColors[issue.severity] || severityColors.stable;
       const severityRadius =
         issue.severity === "critical" ? 2200 : issue.severity === "urgent" ? 1600 : 1100;
@@ -595,6 +633,11 @@ async function initIntelligencePage(currentUser) {
                     <h3>${alert.title}</h3>
                     <p class="muted">${alert.explanation}</p>
                     <p class="helper-copy">${alert.locationName} · ${alert.evidenceCount} linked reports</p>
+                    ${
+                      alert.evidence?.length
+                        ? `<p class="helper-copy">${alert.evidence[1] || alert.evidence[0]}</p>`
+                        : ""
+                    }
                   </article>
                 `
               )
@@ -611,7 +654,9 @@ async function initIntelligencePage(currentUser) {
       }
 
       if (volunteerSummary) {
-        const volunteerTasks = tasks.filter((task) => task.assignedUsers?.length);
+        const volunteerTasks = tasks.filter(
+          (task) => (task.currentUserMatch?.score || 0) > 0 || task.assignedUsers?.length
+        );
         volunteerSummary.innerHTML = volunteerTasks.length
           ? volunteerTasks
               .slice(0, 3)
@@ -619,7 +664,11 @@ async function initIntelligencePage(currentUser) {
                 (task) => `
                   <li>
                     <span>${task.title}</span>
-                    <strong>${task.assignedUsers.map((user) => user.name).join(", ") || "Pending"}</strong>
+                    <strong>${
+                      currentUser?.role === "volunteer"
+                        ? `${Math.round(task.currentUserMatch?.score || 0)} fit score`
+                        : task.assignedUsers.map((user) => user.name).join(", ") || "Pending"
+                    }</strong>
                   </li>
                 `
               )
@@ -791,7 +840,7 @@ async function initImpactPage(currentUser) {
       const combinedRows = [
         ...(report.receiptLines || []).map((line) => ({
           title: line.title,
-          meta: `${line.locationName} · ${line.volunteers} volunteers`
+          meta: `${line.locationName} · ${line.volunteers} volunteers · ${line.outputMetric || line.completedAt}`
         })),
         ...(report.recentReports || []).map((item) => ({
           title: "Previous export",
@@ -965,6 +1014,11 @@ async function initAdminPage() {
                     <span class="severity-badge ${alert.severity}">${capitalize(alert.severity)}</span>
                     <h3>${alert.title}</h3>
                     <p class="muted">${alert.explanation}</p>
+                    ${
+                      alert.evidence?.length
+                        ? `<p class="helper-copy">${alert.evidence.join(" · ")}</p>`
+                        : ""
+                    }
                   </article>
                 `
               )
@@ -991,6 +1045,10 @@ async function initAdminPage() {
                         <textarea name="description">${item.description}</textarea>
                       </label>
                       <label>
+                        Corrected text
+                        <textarea name="correctedText">${item.correctedText || item.rawText || item.description}</textarea>
+                      </label>
+                      <label>
                         Severity
                         <select name="severity">
                           <option value="critical" ${item.severity === "critical" ? "selected" : ""}>Critical</option>
@@ -1002,6 +1060,16 @@ async function initAdminPage() {
                         Location
                         <input name="locationName" value="${item.locationName}" />
                       </label>
+                      ${
+                        item.flaggedWords?.length
+                          ? `<p class="helper-copy">Flagged terms: ${item.flaggedWords.join(", ")}</p>`
+                          : ""
+                      }
+                      ${
+                        item.evidence?.length
+                          ? `<p class="helper-copy">Evidence: ${item.evidence.join(" · ")}</p>`
+                          : ""
+                      }
                       <button class="cta-button" type="submit">Approve and update</button>
                     </form>
                   </article>
@@ -1030,7 +1098,28 @@ async function initAdminPage() {
                     <article class="dashboard-shell teal">
                       <h3>${match.taskTitle}</h3>
                       <p class="muted">${match.locationName}</p>
+                      <p class="helper-copy">
+                        Required: ${(match.requiredSkills || []).map(prettyLabel).join(", ") || "General support"}
+                      </p>
+                      ${
+                        match.complementarySkills?.length
+                          ? `<p class="helper-copy">Complementary: ${match.complementarySkills.map(prettyLabel).join(", ")}</p>`
+                          : ""
+                      }
                       <p>${match.volunteers.length ? match.volunteers.map((user) => user.name).join(" + ") : "No strong match yet"}</p>
+                      <p class="helper-copy">${match.safetyMode === "buddy_required" ? "Buddy team required" : "Solo-safe assignment"}</p>
+                      ${
+                        match.volunteers.length
+                          ? `<p class="helper-copy">${match.volunteers
+                              .map((user) => `${user.name}: ${(user.reasons || []).join(", ")}`)
+                              .join(" · ")}</p>`
+                          : ""
+                      }
+                      ${
+                        match.warnings?.length
+                          ? `<p class="helper-copy">${match.warnings.join(" · ")}</p>`
+                          : ""
+                      }
                     </article>
                   `
                 )
@@ -1101,8 +1190,14 @@ async function initReportPage() {
         if (ocrResult) {
           ocrResult.innerHTML = `
             <strong>OCR extracted text</strong>
-            <p class="helper-copy">Average confidence: ${result.ocr.averageConfidence}</p>
+            <p class="helper-copy">Provider: ${result.ocr.provider} · Confidence: ${result.ocr.averageConfidence}</p>
+            <p class="helper-copy">Languages: ${(result.ocr.languagesDetected || []).join(", ") || "Unspecified"}</p>
             <pre>${result.ocr.text}</pre>
+            ${
+              result.ocr.lowConfidenceWords?.length
+                ? `<p class="helper-copy">Flagged words for review: ${result.ocr.lowConfidenceWords.join(", ")}</p>`
+                : ""
+            }
             <p class="helper-copy">${result.need.needsReview ? "Flagged for review because confidence fell below the threshold." : "Captured cleanly and routed into the live need queue."}</p>
           `;
         }
@@ -1172,8 +1267,14 @@ async function initReportPage() {
           audioResult.innerHTML = `
             <strong>Voice transcription</strong>
             <p class="helper-copy">Provider: ${result.transcript.provider} · Model: ${result.transcript.model}</p>
+            <p class="helper-copy">Languages: ${(result.transcript.languagesDetected || []).join(", ") || "Unspecified"}</p>
             <pre>${result.transcript.text}</pre>
             <p class="helper-copy">Classified as ${capitalize(result.need.type)} with ${capitalize(result.need.severity)} severity.</p>
+            ${
+              result.transcript.keyPhrases?.length
+                ? `<p class="helper-copy">Key phrases: ${result.transcript.keyPhrases.join(", ")}</p>`
+                : ""
+            }
           `;
         }
         showGlobalBanner("Audio report transcribed and routed.", "success");
@@ -1220,6 +1321,14 @@ async function initProfilePage(currentUser) {
   const nameField = document.getElementById("profileName");
   const skillsField = document.getElementById("profileSkills");
   const languagesField = document.getElementById("profileLanguages");
+  const medicalTrainingField = document.getElementById("profileMedicalTraining");
+  const technicalSkillsField = document.getElementById("profileTechnicalSkills");
+  const communicationStyleField = document.getElementById("profileCommunicationStyle");
+  const preferredCausesField = document.getElementById("profilePreferredCauses");
+  const govIdField = document.getElementById("profileGovIdLast4");
+  const emergencyNameField = document.getElementById("profileEmergencyName");
+  const emergencyPhoneField = document.getElementById("profileEmergencyPhone");
+  const vaccinationStatusField = document.getElementById("profileVaccinationStatus");
   const availabilityField = document.getElementById("profileAvailability");
   const locationField = document.getElementById("profileLocation");
 
@@ -1230,6 +1339,30 @@ async function initProfilePage(currentUser) {
   nameField.value = currentUser.name || "";
   skillsField.value = (currentUser.skills || []).join(", ");
   languagesField.value = (currentUser.languages || []).join(", ");
+  if (medicalTrainingField) {
+    medicalTrainingField.value = currentUser.medicalTraining || "none";
+  }
+  if (technicalSkillsField) {
+    technicalSkillsField.value = (currentUser.technicalSkills || []).join(", ");
+  }
+  if (communicationStyleField) {
+    communicationStyleField.value = currentUser.communicationStyle || "community_bridge";
+  }
+  if (preferredCausesField) {
+    preferredCausesField.value = (currentUser.preferredCauses || []).join(", ");
+  }
+  if (govIdField) {
+    govIdField.value = currentUser.govIdLast4 || "";
+  }
+  if (emergencyNameField) {
+    emergencyNameField.value = currentUser.emergencyContactName || "";
+  }
+  if (emergencyPhoneField) {
+    emergencyPhoneField.value = currentUser.emergencyContactPhone || "";
+  }
+  if (vaccinationStatusField) {
+    vaccinationStatusField.value = currentUser.vaccinationStatus || "unknown";
+  }
   availabilityField.value = currentUser.availability || "";
   locationField.value = currentUser.baseLocation || "";
 
@@ -1240,7 +1373,9 @@ async function initProfilePage(currentUser) {
     try {
       const payload = Object.fromEntries(formData.entries());
       payload.skills = payload.skills || "";
+      payload.technicalSkills = payload.technicalSkills || "";
       payload.languages = payload.languages || "";
+      payload.preferredCauses = payload.preferredCauses || "";
       const result = await apiFetch("/api/profile", {
         method: "PUT",
         body: payload

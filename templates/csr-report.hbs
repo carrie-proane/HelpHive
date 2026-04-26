@@ -214,6 +214,8 @@
             <div class="line-item">
               <strong>{{title}}</strong>
               <small>{{locationName}} · {{volunteers}} volunteers · {{completedAt}}</small>
+              <small>{{outputMetric}}</small>
+              <small>{{outcomeMetric}}</small>
             </div>
           {{/each}}
         </div>
@@ -228,6 +230,47 @@
             {{label}}: {{value}}{{#unless @last}}, {{/unless}}
           {{/each}}
         </p>
+      </article>
+    </section>
+
+    <section class="section chart-row">
+      <article class="story">
+        <h2>Outcome Proxies</h2>
+        <div class="line-list">
+          {{#each outcomeMetrics}}
+            <div class="line-item">
+              <strong>{{label}}</strong>
+              <small>{{value}}</small>
+              <small>{{description}}</small>
+            </div>
+          {{/each}}
+        </div>
+      </article>
+
+      <article class="story">
+        <h2>Framework Alignment</h2>
+        <div class="line-list">
+          {{#each frameworkAlignment}}
+            <div class="line-item">
+              <strong>{{framework}}</strong>
+              <small>{{focus}}</small>
+            </div>
+          {{/each}}
+        </div>
+      </article>
+    </section>
+
+    <section class="section">
+      <article class="story">
+        <h2>Impact Voices</h2>
+        <div class="line-list">
+          {{#each testimonials}}
+            <div class="line-item">
+              <strong>{{quote}}</strong>
+              <small>{{attribution}}</small>
+            </div>
+          {{/each}}
+        </div>
       </article>
     </section>
 

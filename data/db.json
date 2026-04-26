@@ -25,10 +25,20 @@
         "governance",
         "review"
       ],
+      "technicalSkills": [
+        "dashboard oversight",
+        "incident triage"
+      ],
       "languages": [
         "Marathi",
         "Hindi",
         "English"
+      ],
+      "medicalTraining": "none",
+      "communicationStyle": "analytical",
+      "preferredCauses": [
+        "operations",
+        "public_health"
       ],
       "availability": "Full-time",
       "baseLocation": "Shivajinagar",
@@ -47,9 +57,19 @@
         "survey intake",
         "routing"
       ],
+      "technicalSkills": [
+        "ocr review",
+        "data collection"
+      ],
       "languages": [
         "Marathi",
         "Hindi"
+      ],
+      "medicalTraining": "community_health",
+      "communicationStyle": "community_bridge",
+      "preferredCauses": [
+        "health",
+        "water"
       ],
       "availability": "Weekdays 8 AM - 6 PM",
       "baseLocation": "Kasba Peth",
@@ -68,9 +88,20 @@
         "meal distribution",
         "marathi"
       ],
+      "technicalSkills": [
+        "route planning",
+        "inventory tracking"
+      ],
       "languages": [
         "Marathi",
         "Hindi"
+      ],
+      "medicalTraining": "first_aid",
+      "communicationStyle": "directive",
+      "preferredCauses": [
+        "nutrition",
+        "water",
+        "operations"
       ],
       "availability": "Weekends and evenings",
       "baseLocation": "Kothrud",
@@ -89,10 +120,20 @@
         "triage",
         "marathi"
       ],
+      "technicalSkills": [
+        "symptom logging",
+        "data collection"
+      ],
       "languages": [
         "Marathi",
         "Hindi",
         "Urdu"
+      ],
+      "medicalTraining": "nurse",
+      "communicationStyle": "calm_reassuring",
+      "preferredCauses": [
+        "health",
+        "public_health"
       ],
       "availability": "Mornings",
       "baseLocation": "Yerawada",
@@ -110,9 +151,19 @@
         "reporting",
         "funding"
       ],
+      "technicalSkills": [
+        "impact reporting",
+        "data storytelling"
+      ],
       "languages": [
         "English",
         "Hindi"
+      ],
+      "medicalTraining": "none",
+      "communicationStyle": "analytical",
+      "preferredCauses": [
+        "education",
+        "nutrition"
       ],
       "availability": "Business hours",
       "baseLocation": "Camp",
@@ -243,14 +294,38 @@
       "longitude": 73.8446,
       "severity": "critical",
       "status": "completed",
-      "requiredSkills": [
-        "logistics",
-        "marathi",
-        "community outreach"
-      ],
-      "assignedVolunteerIds": [
-        "user_volunteer_1"
-      ],
+    "requiredSkills": [
+      "logistics",
+      "marathi",
+      "community outreach"
+    ],
+    "complementarySkills": [
+      "route planning",
+      "field assessment",
+      "community translation"
+    ],
+    "preferredLanguages": [
+      "Marathi",
+      "Hindi"
+    ],
+    "preferredCommunicationStyles": [
+      "community_bridge",
+      "calm_reassuring"
+    ],
+    "contextTags": [
+      "water access",
+      "household support",
+      "high_stress"
+    ],
+    "minimumMedicalTraining": "none",
+    "category": "infrastructure",
+    "timeWindows": [
+      "morning",
+      "afternoon"
+    ],
+    "assignedVolunteerIds": [
+      "user_volunteer_1"
+    ],
       "buddySuggestionIds": [
         "user_volunteer_2"
       ],
@@ -270,11 +345,35 @@
       "longitude": 73.7997,
       "severity": "urgent",
       "status": "open",
-      "requiredSkills": [
-        "logistics",
-        "community outreach"
-      ],
-      "assignedVolunteerIds": [],
+    "requiredSkills": [
+      "logistics",
+      "community outreach"
+    ],
+    "complementarySkills": [
+      "documentation",
+      "local translation",
+      "route planning"
+    ],
+    "preferredLanguages": [
+      "Marathi",
+      "Hindi"
+    ],
+    "preferredCommunicationStyles": [
+      "directive",
+      "community_bridge"
+    ],
+    "contextTags": [
+      "hygiene",
+      "waste clearing",
+      "resident coordination"
+    ],
+    "minimumMedicalTraining": "none",
+    "category": "public_health",
+    "timeWindows": [
+      "morning",
+      "afternoon"
+    ],
+    "assignedVolunteerIds": [],
       "buddySuggestionIds": [
         "user_volunteer_1"
       ],
@@ -293,13 +392,36 @@
       "longitude": 73.8077,
       "severity": "stable",
       "status": "in_progress",
-      "requiredSkills": [
-        "meal distribution",
-        "logistics"
-      ],
-      "assignedVolunteerIds": [
-        "user_volunteer_1"
-      ],
+    "requiredSkills": [
+      "meal distribution",
+      "logistics"
+    ],
+    "complementarySkills": [
+      "coordination",
+      "team leading",
+      "data collection"
+    ],
+    "preferredLanguages": [
+      "Marathi",
+      "Hindi"
+    ],
+    "preferredCommunicationStyles": [
+      "community_bridge",
+      "directive"
+    ],
+    "contextTags": [
+      "surge support",
+      "shift coverage"
+    ],
+    "minimumMedicalTraining": "none",
+    "category": "operations",
+    "timeWindows": [
+      "evening",
+      "weekend"
+    ],
+    "assignedVolunteerIds": [
+      "user_volunteer_1"
+    ],
       "buddySuggestionIds": [
         "user_volunteer_1"
       ],
@@ -318,14 +440,39 @@
       "longitude": 73.8893,
       "severity": "critical",
       "status": "in_progress",
-      "requiredSkills": [
-        "medical",
-        "triage",
-        "marathi"
-      ],
-      "assignedVolunteerIds": [
-        "user_volunteer_2"
-      ],
+    "requiredSkills": [
+      "medical",
+      "triage",
+      "marathi"
+    ],
+    "complementarySkills": [
+      "local translation",
+      "logistics",
+      "data collection"
+    ],
+    "preferredLanguages": [
+      "Marathi",
+      "Hindi",
+      "Urdu"
+    ],
+    "preferredCommunicationStyles": [
+      "calm_reassuring",
+      "directive"
+    ],
+    "contextTags": [
+      "health response",
+      "triage",
+      "medication support"
+    ],
+    "minimumMedicalTraining": "community_health",
+    "category": "health",
+    "timeWindows": [
+      "morning",
+      "on_call"
+    ],
+    "assignedVolunteerIds": [
+      "user_volunteer_2"
+    ],
       "buddySuggestionIds": [
         "user_volunteer_1"
       ],
@@ -344,13 +491,37 @@
       "longitude": 73.9259,
       "severity": "urgent",
       "status": "completed",
-      "requiredSkills": [
-        "meal distribution",
-        "logistics"
-      ],
-      "assignedVolunteerIds": [
-        "user_volunteer_1",
-        "user_volunteer_2"
+    "requiredSkills": [
+      "meal distribution",
+      "logistics"
+    ],
+    "complementarySkills": [
+      "inventory tracking",
+      "community translation",
+      "route planning"
+    ],
+    "preferredLanguages": [
+      "Marathi",
+      "Hindi"
+    ],
+    "preferredCommunicationStyles": [
+      "community_bridge",
+      "calm_reassuring"
+    ],
+    "contextTags": [
+      "meal support",
+      "household delivery"
+    ],
+    "minimumMedicalTraining": "none",
+    "category": "nutrition",
+    "timeWindows": [
+      "morning",
+      "evening",
+      "weekend"
+    ],
+    "assignedVolunteerIds": [
+      "user_volunteer_1",
+      "user_volunteer_2"
       ],
       "buddySuggestionIds": [],
       "sponsorCompanyId": "company_sunrise",

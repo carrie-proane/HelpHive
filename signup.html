@@ -83,6 +83,59 @@
                 <input type="text" name="skills" placeholder="medical, logistics, Marathi, outreach" />
               </label>
               <label>
+                Languages
+                <input type="text" name="languages" placeholder="Marathi, Hindi, English" />
+              </label>
+              <label>
+                Medical training
+                <select name="medicalTraining">
+                  <option value="none">No formal training</option>
+                  <option value="first_aid">First aid certified</option>
+                  <option value="community_health">Community health worker</option>
+                  <option value="nurse">Nurse</option>
+                  <option value="doctor">Doctor</option>
+                </select>
+              </label>
+              <label>
+                Technical skills
+                <input type="text" name="technicalSkills" placeholder="data collection, route planning, GIS, translation tools" />
+              </label>
+              <label>
+                Communication style
+                <select name="communicationStyle">
+                  <option value="community_bridge">Community bridge-builder</option>
+                  <option value="calm_reassuring">Calm and reassuring</option>
+                  <option value="directive">Directive in the field</option>
+                  <option value="analytical">Analytical and structured</option>
+                  <option value="translator">Translator / interpreter</option>
+                </select>
+              </label>
+              <label>
+                Preferred causes
+                <input type="text" name="preferredCauses" placeholder="medical, nutrition, shelter, education" />
+              </label>
+              <label>
+                ID reference
+                <input type="text" name="govIdLast4" maxlength="4" placeholder="Last 4 digits only" />
+              </label>
+              <label>
+                Emergency contact name
+                <input type="text" name="emergencyContactName" placeholder="Family member or team lead" />
+              </label>
+              <label>
+                Emergency contact phone
+                <input type="text" name="emergencyContactPhone" placeholder="+91..." />
+              </label>
+              <label>
+                Vaccination status
+                <select name="vaccinationStatus">
+                  <option value="unknown">Unknown</option>
+                  <option value="up_to_date">Up to date</option>
+                  <option value="partial">Partial</option>
+                  <option value="not_disclosed">Prefer not to say</option>
+                </select>
+              </label>
+              <label>
                 Availability
                 <input type="text" name="availability" placeholder="Weekends, evenings, weekdays..." />
               </label>
@@ -101,6 +154,10 @@
             <p class="helper-copy">
               Admin access stays seeded in the backend and is not exposed in the
               public signup flow.
+            </p>
+            <p class="helper-copy">
+              Skill-aware matching now considers geography, language fluency, medical readiness,
+              technical strengths, and communication style together.
             </p>
           </aside>
         </div>
