@@ -90,6 +90,59 @@
                     <input id="profileLanguages" name="languages" placeholder="Marathi, Hindi, English" />
                   </label>
                   <label>
+                    Medical training
+                    <select id="profileMedicalTraining" name="medicalTraining">
+                      <option value="none">No formal training</option>
+                      <option value="first_aid">First aid certified</option>
+                      <option value="community_health">Community health worker</option>
+                      <option value="nurse">Nurse</option>
+                      <option value="doctor">Doctor</option>
+                    </select>
+                  </label>
+                  <label>
+                    Technical skills
+                    <input
+                      id="profileTechnicalSkills"
+                      name="technicalSkills"
+                      placeholder="data collection, route planning, GIS, translation tools"
+                    />
+                  </label>
+                  <label>
+                    Communication style
+                    <select id="profileCommunicationStyle" name="communicationStyle">
+                      <option value="community_bridge">Community bridge-builder</option>
+                      <option value="calm_reassuring">Calm and reassuring</option>
+                      <option value="directive">Directive in the field</option>
+                      <option value="analytical">Analytical and structured</option>
+                      <option value="translator">Translator / interpreter</option>
+                    </select>
+                  </label>
+                  <label>
+                    Preferred causes
+                    <input id="profilePreferredCauses" name="preferredCauses" placeholder="medical, nutrition, shelter, education" />
+                  </label>
+                  <label>
+                    ID reference
+                    <input id="profileGovIdLast4" name="govIdLast4" maxlength="4" placeholder="Last 4 digits only" />
+                  </label>
+                  <label>
+                    Emergency contact name
+                    <input id="profileEmergencyName" name="emergencyContactName" placeholder="Family member or team lead" />
+                  </label>
+                  <label>
+                    Emergency contact phone
+                    <input id="profileEmergencyPhone" name="emergencyContactPhone" placeholder="+91..." />
+                  </label>
+                  <label>
+                    Vaccination status
+                    <select id="profileVaccinationStatus" name="vaccinationStatus">
+                      <option value="unknown">Unknown</option>
+                      <option value="up_to_date">Up to date</option>
+                      <option value="partial">Partial</option>
+                      <option value="not_disclosed">Prefer not to say</option>
+                    </select>
+                  </label>
+                  <label>
                     Availability
                     <input id="profileAvailability" name="availability" placeholder="Weekends, weekdays, evenings" />
                   </label>
@@ -105,14 +158,14 @@
                 <article class="contact-card lavender">
                   <span class="side-kicker">Why it matters</span>
                   <p class="muted">
-                    Volunteer buddy matching uses skill overlap and base location.
-                    NGO and admin workflows also benefit from language and routing clarity.
+                    Volunteer buddy matching now blends skill overlap, complementary team fit,
+                    local-language fluency, medical readiness, communication style, and base location.
                   </p>
                 </article>
                 <article class="contact-card blue">
                   <span class="side-kicker">Tip</span>
                   <p class="muted">
-                    Keep skills comma-separated so the matching engine can reuse them directly.
+                    Keep skills and preferred causes comma-separated so the matching engine can reuse them directly.
                   </p>
                 </article>
               </div>

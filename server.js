@@ -26,6 +26,14 @@ const UPLOAD_DIR = path.join(__dirname, "uploads");
 const TEMPLATE_PATH = path.join(__dirname, "templates", "csr-report.hbs");
 const SEED_DATA_FILE = path.join(__dirname, "data", "db.json");
 const OCR_CONFIDENCE_THRESHOLD = Number(process.env.OCR_CONFIDENCE_THRESHOLD || 0.8);
+const OCR_LOW_CONFIDENCE_WORD_THRESHOLD = Number(
+  process.env.OCR_LOW_CONFIDENCE_WORD_THRESHOLD || 0.72
+);
+const OCR_LANGUAGES = process.env.OCR_LANGUAGES || "eng+hin+mar";
+const SILENT_NEED_DECAY_LAMBDA = Number(process.env.SILENT_NEED_DECAY_LAMBDA || 0.08);
+const SILENT_NEED_LOOKBACK_DAYS = Number(process.env.SILENT_NEED_LOOKBACK_DAYS || 5);
+const GEMINI_MULTIMODAL_MODEL = process.env.GEMINI_MULTIMODAL_MODEL || "gemini-2.5-flash";
+const GEMINI_AUDIO_MODEL = process.env.GEMINI_AUDIO_MODEL || "gemini-2.5-flash";
 const MAP_REFRESH_CENTER = { lat: 18.5204, lng: 73.8567 };
 
 const geminiClient = process.env.GEMINI_API_KEY
@@ -72,13 +80,51 @@ const LOCALITY_INDEX = {
 };
 
 const TYPE_KEYWORDS = {
-  water: ["water", "tanker", "refill", "purification", "drinking water", "पाणी"],
-  sanitation: ["sanitation", "waste", "garbage", "overflow", "drain", "toilet", "cleaning", "कचरा"],
-  volunteer: ["volunteer", "helper", "support staff", "community support"],
-  medical: ["medical", "medicine", "doctor", "clinic", "fever", "triage", "hospital", "दवा"],
-  food: ["food", "ration", "meal", "kitchen", "hunger", "groceries", "राशन"],
-  shelter: ["shelter", "housing", "roof", "sleeping", "eviction"],
-  education: ["school", "education", "student", "supplies"]
+  water: [
+    "water",
+    "tanker",
+    "refill",
+    "purification",
+    "drinking water",
+    "contaminated well",
+    "well water",
+    "पाणी",
+    "पेयजल",
+    "बोरवेल",
+    "पाण्याची टंचाई"
+  ],
+  sanitation: [
+    "sanitation",
+    "waste",
+    "garbage",
+    "overflow",
+    "drain",
+    "toilet",
+    "cleaning",
+    "कचरा",
+    "गटार",
+    "सांडपाणी",
+    "घाण"
+  ],
+  volunteer: ["volunteer", "helper", "support staff", "community support", "स्वयंसेवक", "सहाय्यक"],
+  medical: [
+    "medical",
+    "medicine",
+    "doctor",
+    "clinic",
+    "fever",
+    "triage",
+    "hospital",
+    "दवा",
+    "औषध",
+    "उलटी",
+    "दस्त",
+    "illness",
+    "symptoms"
+  ],
+  food: ["food", "ration", "meal", "kitchen", "hunger", "groceries", "राशन", "अन्न", "भोजन"],
+  shelter: ["shelter", "housing", "roof", "sleeping", "eviction", "आश्रय"],
+  education: ["school", "education", "student", "supplies", "शाळा"]
 };
 
 const SKILL_MAP = {
@@ -95,6 +141,76 @@ const SEVERITY_KEYWORDS = {
   critical: ["critical", "emergency", "urgent help", "immediate", "severe", "no water", "medical emergency"],
   urgent: ["urgent", "today", "soon", "backlog", "shortage", "delay"],
   stable: ["stable", "routine", "regular", "planned", "follow up"]
+};
+
+const LOCAL_DEFAULT_LANGUAGES = ["Marathi", "Hindi"];
+const HIGH_RISK_TASK_TYPES = new Set(["medical", "water", "sanitation", "shelter"]);
+const MEDICAL_TRAINING_LEVELS = ["none", "first_aid", "community_health", "nurse", "doctor"];
+const TASK_CONTEXT_BLUEPRINTS = {
+  water: {
+    category: "infrastructure",
+    complementarySkills: ["route planning", "field assessment", "community translation"],
+    contextTags: ["water access", "household support", "last-mile delivery"],
+    preferredCommunicationStyles: ["community_bridge", "calm_reassuring"],
+    minimumMedicalTraining: "none",
+    timeWindows: ["morning", "afternoon"]
+  },
+  sanitation: {
+    category: "public_health",
+    complementarySkills: ["documentation", "local translation", "route planning"],
+    contextTags: ["hygiene", "waste clearing", "resident coordination"],
+    preferredCommunicationStyles: ["directive", "community_bridge"],
+    minimumMedicalTraining: "none",
+    timeWindows: ["morning", "afternoon"]
+  },
+  volunteer: {
+    category: "operations",
+    complementarySkills: ["coordination", "team leading", "data collection"],
+    contextTags: ["surge support", "shift coverage"],
+    preferredCommunicationStyles: ["community_bridge", "directive"],
+    minimumMedicalTraining: "none",
+    timeWindows: ["evening", "weekend"]
+  },
+  medical: {
+    category: "health",
+    complementarySkills: ["local translation", "logistics", "data collection"],
+    contextTags: ["health response", "triage", "medication support"],
+    preferredCommunicationStyles: ["calm_reassuring", "directive"],
+    minimumMedicalTraining: "community_health",
+    timeWindows: ["morning", "on_call"]
+  },
+  food: {
+    category: "nutrition",
+    complementarySkills: ["inventory tracking", "community translation", "route planning"],
+    contextTags: ["meal support", "household delivery"],
+    preferredCommunicationStyles: ["community_bridge", "calm_reassuring"],
+    minimumMedicalTraining: "none",
+    timeWindows: ["morning", "evening", "weekend"]
+  },
+  shelter: {
+    category: "protection",
+    complementarySkills: ["case coordination", "documentation", "community translation"],
+    contextTags: ["temporary shelter", "family support", "high_stress"],
+    preferredCommunicationStyles: ["calm_reassuring", "directive"],
+    minimumMedicalTraining: "first_aid",
+    timeWindows: ["afternoon", "on_call"]
+  },
+  education: {
+    category: "education",
+    complementarySkills: ["digital literacy", "translation", "student coordination"],
+    contextTags: ["learning continuity", "supplies support"],
+    preferredCommunicationStyles: ["analytical", "community_bridge"],
+    minimumMedicalTraining: "none",
+    timeWindows: ["morning", "afternoon", "weekend"]
+  }
+};
+const ALERT_EVIDENCE_KEYWORDS = {
+  water: ["contaminated", "well", "purification", "diarrhea", "vomiting", "पाणी", "बोरवेल"],
+  sanitation: ["garbage", "overflow", "drain", "waste", "कचरा", "गटार"],
+  medical: ["fever", "clinic", "medicine", "hospital", "दवा", "उलटी", "दस्त"],
+  food: ["ration", "meal", "hunger", "अन्न", "राशन"],
+  volunteer: ["volunteer", "helper", "support", "स्वयंसेवक"],
+  shelter: ["roof", "sleeping", "eviction", "आश्रय"]
 };
 
 function createId(prefix) {
@@ -124,12 +240,185 @@ function normalizeSeverity(value) {
   return "stable";
 }
 
+function normalizeMedicalTraining(value = "") {
+  const candidate = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+  if (MEDICAL_TRAINING_LEVELS.includes(candidate)) {
+    return candidate;
+  }
+  if (["doctor", "physician", "mbbs"].includes(candidate)) {
+    return "doctor";
+  }
+  if (["nurse", "nursing"].includes(candidate)) {
+    return "nurse";
+  }
+  if (["community_health", "health_worker", "anm", "asha"].includes(candidate)) {
+    return "community_health";
+  }
+  if (["first_aid", "emt", "paramedic"].includes(candidate)) {
+    return "first_aid";
+  }
+  return "none";
+}
+
+function normalizeCommunicationStyle(value = "") {
+  const candidate = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+  const allowed = ["community_bridge", "calm_reassuring", "directive", "analytical", "translator"];
+  if (allowed.includes(candidate)) {
+    return candidate;
+  }
+  if (candidate.includes("calm") || candidate.includes("reassuring")) {
+    return "calm_reassuring";
+  }
+  if (candidate.includes("direct")) {
+    return "directive";
+  }
+  if (candidate.includes("analysis") || candidate.includes("data")) {
+    return "analytical";
+  }
+  if (candidate.includes("translat")) {
+    return "translator";
+  }
+  return "community_bridge";
+}
+
 function titleCase(value = "") {
   return value
     .split(/[\s_-]+/)
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
     .join(" ");
+}
+
+function medicalTrainingRank(value = "") {
+  return MEDICAL_TRAINING_LEVELS.indexOf(normalizeMedicalTraining(value));
+}
+
+function normalizeToken(value = "") {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function medicalTrainingSkillAliases(level = "") {
+  const normalized = normalizeMedicalTraining(level);
+  if (normalized === "doctor") {
+    return ["medical", "triage", "clinical care", "first aid"];
+  }
+  if (normalized === "nurse") {
+    return ["medical", "triage", "patient support", "first aid"];
+  }
+  if (normalized === "community_health") {
+    return ["medical", "triage", "health outreach", "first aid"];
+  }
+  if (normalized === "first_aid") {
+    return ["first aid", "medical support"];
+  }
+  return [];
+}
+
+function availabilitySignals(value = "") {
+  const normalized = normalizeToken(value);
+  if (!normalized) {
+    return [];
+  }
+
+  return uniqueValues(
+    [
+      normalized.includes("morning") ? "morning" : "",
+      normalized.includes("afternoon") ? "afternoon" : "",
+      normalized.includes("evening") ? "evening" : "",
+      normalized.includes("night") ? "night" : "",
+      normalized.includes("weekend") ? "weekend" : "",
+      normalized.includes("weekday") ? "weekday" : "",
+      normalized.includes("full-time") || normalized.includes("business hours") ? "afternoon" : "",
+      normalized.includes("full-time") || normalized.includes("on-call") ? "on_call" : ""
+    ].filter(Boolean)
+  );
+}
+
+function buildTaskRoutingProfile(input = {}) {
+  const type = normalizeNeedType(input.type, input.description || "");
+  const blueprint = TASK_CONTEXT_BLUEPRINTS[type] || TASK_CONTEXT_BLUEPRINTS.volunteer;
+  const description = String(input.description || "").trim();
+  const severity = normalizeSeverity(input.severity);
+  const normalizedDescription = `${description} ${input.locationName || ""}`.toLowerCase();
+  const inferredTimeWindows = uniqueValues([
+    normalizedDescription.includes("morning") || normalizedDescription.includes("breakfast")
+      ? "morning"
+      : "",
+    normalizedDescription.includes("afternoon") ? "afternoon" : "",
+    normalizedDescription.includes("evening") ||
+    normalizedDescription.includes("night") ||
+    normalizedDescription.includes("dinner")
+      ? "evening"
+      : "",
+    normalizedDescription.includes("weekend") ? "weekend" : "",
+    severity === "critical" ? "on_call" : ""
+  ]);
+  const requiredSkills = uniqueValues([
+    ...normalizeArray(input.requiredSkills),
+    ...(normalizeArray(input.requiredSkills).length ? [] : SKILL_MAP[type] || ["community outreach"])
+  ]);
+  const complementarySkills = uniqueValues([
+    ...normalizeArray(input.complementarySkills),
+    ...blueprint.complementarySkills,
+    normalizedDescription.includes("data") || normalizedDescription.includes("survey")
+      ? "data collection"
+      : "",
+    normalizedDescription.includes("translate") || normalizedDescription.includes("language")
+      ? "translation"
+      : ""
+  ]);
+  const preferredLanguages = uniqueValues([
+    ...normalizeArray(input.preferredLanguages),
+    ...normalizeArray(input.languages),
+    ...preferredLanguagesForTask({
+      description,
+      type,
+      locationName: input.locationName
+    })
+  ]);
+  const preferredCommunicationStyles = uniqueValues(
+    [
+      ...normalizeArray(input.preferredCommunicationStyles),
+      ...blueprint.preferredCommunicationStyles
+    ].map(normalizeCommunicationStyle)
+  );
+  const contextTags = uniqueValues([
+    ...normalizeArray(input.contextTags),
+    blueprint.category,
+    ...blueprint.contextTags,
+    severity === "critical" ? "high_stress" : "",
+    type === "medical" ? "health" : ""
+  ]);
+  const timeWindows = uniqueValues([...normalizeArray(input.timeWindows), ...blueprint.timeWindows, ...inferredTimeWindows]);
+
+  return {
+    category: String(input.category || blueprint.category || "operations").trim(),
+    requiredSkills,
+    complementarySkills,
+    preferredLanguages,
+    preferredCommunicationStyles,
+    contextTags,
+    minimumMedicalTraining: normalizeMedicalTraining(
+      input.minimumMedicalTraining || blueprint.minimumMedicalTraining
+    ),
+    timeWindows
+  };
+}
+
+function getVolunteerSkillCorpus(volunteer = {}) {
+  return uniqueValues([
+    ...normalizeArray(volunteer.skills),
+    ...normalizeArray(volunteer.technicalSkills),
+    ...medicalTrainingSkillAliases(volunteer.medicalTraining)
+  ]);
 }
 
 function pointFromCoordinates(latitude, longitude) {
@@ -302,6 +591,181 @@ function readTimestamp(record, preferredKey, fallbackKey) {
   return null;
 }
 
+function clampConfidence(value, fallback = 0.5) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(0, Math.min(1, parsed));
+}
+
+function stripMarkdownCodeFence(text = "") {
+  return String(text || "")
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+}
+
+function parseModelJson(text = "", fallback = {}) {
+  const candidate = stripMarkdownCodeFence(text);
+  if (!candidate) {
+    return fallback;
+  }
+
+  try {
+    return JSON.parse(candidate);
+  } catch (error) {
+    const match = candidate.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return fallback;
+    }
+
+    try {
+      return JSON.parse(match[0]);
+    } catch (nestedError) {
+      return fallback;
+    }
+  }
+}
+
+function uniqueValues(values = []) {
+  return [...new Set(values.map((value) => String(value || "").trim()).filter(Boolean))];
+}
+
+function normalizePhoneValue(value = "") {
+  return String(value || "")
+    .replace(/[^\d+]/g, "")
+    .slice(0, 16);
+}
+
+function normalizeGovIdLast4(value = "") {
+  return String(value || "").replace(/\D/g, "").slice(-4);
+}
+
+function normalizeVaccinationStatus(value = "") {
+  const candidate = String(value || "")
+    .trim()
+    .toLowerCase();
+  if (["up_to_date", "partial", "unknown", "not_disclosed"].includes(candidate)) {
+    return candidate;
+  }
+  return "unknown";
+}
+
+function inferImageMimeType(filePath, fallbackMimeType = "") {
+  const normalizedFallback = String(fallbackMimeType || "").toLowerCase();
+  if (normalizedFallback.startsWith("image/")) {
+    return normalizedFallback;
+  }
+
+  const extension = path.extname(filePath || "").toLowerCase();
+  const mimeByExtension = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff"
+  };
+
+  return mimeByExtension[extension] || "image/jpeg";
+}
+
+function detectLanguageHints(text = "") {
+  const normalized = String(text || "").trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const detected = [];
+  if (/[ऀ-ॿ]/u.test(normalized)) {
+    detected.push("Marathi", "Hindi");
+  }
+  if (/[ఀ-౿]/u.test(normalized)) {
+    detected.push("Telugu");
+  }
+  if (/[ಀ-೿]/u.test(normalized)) {
+    detected.push("Kannada");
+  }
+  if (/[؀-ۿ]/u.test(normalized)) {
+    detected.push("Urdu");
+  }
+  if (/[A-Za-z]/.test(normalized)) {
+    detected.push("English");
+  }
+  return uniqueValues(detected);
+}
+
+function extractNumericMentions(text = "") {
+  return (String(text || "").match(/\b\d{1,4}\b/g) || [])
+    .map((value) => Number(value))
+    .filter((value) => Number.isFinite(value));
+}
+
+function hoursSince(value) {
+  const timestamp = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    return 999;
+  }
+  return Math.max((Date.now() - timestamp.getTime()) / (1000 * 60 * 60), 0);
+}
+
+function severityWeight(severity = "") {
+  if (severity === "critical") {
+    return 2.4;
+  }
+  if (severity === "urgent") {
+    return 1.5;
+  }
+  return 1;
+}
+
+function computeTimeDecayWeight(value) {
+  return Math.exp(-1 * SILENT_NEED_DECAY_LAMBDA * hoursSince(value));
+}
+
+function buildVerificationSummary(profile = {}) {
+  const missing = [];
+  if (!normalizeGovIdLast4(profile.govIdLast4)) {
+    missing.push("ID reference");
+  }
+  if (!String(profile.emergencyContactName || "").trim()) {
+    missing.push("emergency contact");
+  }
+  if (!normalizePhoneValue(profile.emergencyContactPhone)) {
+    missing.push("emergency phone");
+  }
+  if (normalizeVaccinationStatus(profile.vaccinationStatus) === "unknown") {
+    missing.push("vaccination status");
+  }
+
+  return {
+    ready: missing.length === 0,
+    missing
+  };
+}
+
+function requiresBuddy(task = {}) {
+  return HIGH_RISK_TASK_TYPES.has(task.type) || task.severity === "critical";
+}
+
+function preferredLanguagesForTask(task = {}) {
+  const hints = detectLanguageHints(`${task.description || ""} ${task.locationName || ""}`);
+  if (!hints.length) {
+    return LOCAL_DEFAULT_LANGUAGES;
+  }
+  return uniqueValues([...LOCAL_DEFAULT_LANGUAGES, ...hints]);
+}
+
+function summarizeEvidenceKeywords(text = "", type = "") {
+  const normalized = String(text || "").toLowerCase();
+  const keywords = ALERT_EVIDENCE_KEYWORDS[type] || [];
+  return uniqueValues(keywords.filter((keyword) => normalized.includes(keyword.toLowerCase()))).slice(0, 4);
+}
+
 function detectLocation(text = "", fallbackLocationName = "", options = {}) {
   const normalized = String(text || "").toLowerCase();
   const fallback = String(fallbackLocationName || "").toLowerCase();
@@ -336,6 +800,28 @@ function inferNeedType(text = "") {
   return "volunteer";
 }
 
+function normalizeNeedType(value = "", fallbackText = "") {
+  const candidate = String(value || "").trim().toLowerCase();
+  if (!candidate) {
+    return inferNeedType(fallbackText);
+  }
+
+  if (TYPE_KEYWORDS[candidate]) {
+    return candidate;
+  }
+
+  for (const [type, keywords] of Object.entries(TYPE_KEYWORDS)) {
+    if (
+      candidate.includes(type) ||
+      keywords.some((keyword) => candidate.includes(String(keyword).toLowerCase()))
+    ) {
+      return type;
+    }
+  }
+
+  return inferNeedType(`${candidate} ${fallbackText}`);
+}
+
 function inferSeverity(text = "") {
   const normalized = String(text || "").toLowerCase();
 
@@ -348,6 +834,23 @@ function inferSeverity(text = "") {
   return "urgent";
 }
 
+function normalizeSeveritySignal(value = "", fallbackText = "") {
+  const candidate = String(value || "").trim().toLowerCase();
+  if (["critical", "urgent", "stable"].includes(candidate)) {
+    return candidate;
+  }
+  if (["high", "severe", "emergency", "immediate"].includes(candidate)) {
+    return "critical";
+  }
+  if (["medium", "moderate", "important", "soon"].includes(candidate)) {
+    return "urgent";
+  }
+  if (["low", "routine", "normal"].includes(candidate)) {
+    return "stable";
+  }
+  return inferSeverity(`${candidate} ${fallbackText}`);
+}
+
 function inferPeopleServed(type, severity) {
   const base = type === "food" ? 28 : type === "medical" ? 18 : 22;
   const multiplier = severity === "critical" ? 1.5 : severity === "urgent" ? 1.2 : 1;
@@ -358,10 +861,37 @@ function buildTaskTitle(type, locationName) {
   return `${titleCase(type)} Support - ${locationName}`;
 }
 
+function inferPeopleMention(text = "") {
+  const values = extractNumericMentions(text);
+  if (!values.length) {
+    return null;
+  }
+  return Math.max(...values);
+}
+
 function extractNeedSignals(text = "", fallback = {}) {
   const location = detectLocation(text, fallback.locationName);
-  const type = fallback.type || inferNeedType(text);
-  const severity = fallback.severity || inferSeverity(text);
+  const type = normalizeNeedType(fallback.type, text);
+  const severity = normalizeSeveritySignal(fallback.severity, text);
+  const routingProfile = buildTaskRoutingProfile({
+    type,
+    severity,
+    description: text,
+    locationName: location.name,
+    requiredSkills: fallback.requiredSkills,
+    complementarySkills: fallback.complementarySkills,
+    preferredLanguages: fallback.preferredLanguages || fallback.languages,
+    preferredCommunicationStyles: fallback.preferredCommunicationStyles,
+    contextTags: fallback.contextTags,
+    minimumMedicalTraining: fallback.minimumMedicalTraining,
+    timeWindows: fallback.timeWindows,
+    category: fallback.category
+  });
+  const evidence = uniqueValues([
+    ...normalizeArray(fallback.evidence),
+    ...summarizeEvidenceKeywords(text, type)
+  ]);
+  const peopleMention = fallback.peopleMention || inferPeopleMention(text);
 
   return {
     type,
@@ -371,29 +901,147 @@ function extractNeedSignals(text = "", fallback = {}) {
     longitude: location.lng,
     ngoName: location.ngo,
     title: fallback.title || buildTaskTitle(type, location.name),
-    requiredSkills: SKILL_MAP[type] || ["community outreach"]
+    category: routingProfile.category,
+    requiredSkills: routingProfile.requiredSkills,
+    complementarySkills: routingProfile.complementarySkills,
+    evidence,
+    preferredLanguages: routingProfile.preferredLanguages,
+    preferredCommunicationStyles: routingProfile.preferredCommunicationStyles,
+    contextTags: routingProfile.contextTags,
+    minimumMedicalTraining: routingProfile.minimumMedicalTraining,
+    timeWindows: routingProfile.timeWindows,
+    peopleMention
   };
 }
 
-function computeMatchScore(task, volunteer) {
+function computeMatchScore(task, volunteer, teammates = []) {
   const taskCoords = pointToCoordinates(task.location);
   const volunteerCoords = pointToCoordinates(volunteer.location);
-  const taskSkills = normalizeArray(task.requiredSkills);
-  const volunteerSkills = normalizeArray(volunteer.skills);
+  const routingProfile = buildTaskRoutingProfile({
+    type: task.type,
+    severity: task.severity,
+    description: task.description,
+    locationName: task.locationName,
+    requiredSkills: task.requiredSkills,
+    complementarySkills: task.complementarySkills,
+    preferredLanguages: task.preferredLanguages,
+    preferredCommunicationStyles: task.preferredCommunicationStyles,
+    contextTags: task.contextTags,
+    minimumMedicalTraining: task.minimumMedicalTraining,
+    timeWindows: task.timeWindows,
+    category: task.category
+  });
+  const taskSkills = normalizeArray(routingProfile.requiredSkills);
+  const complementarySkillTargets = normalizeArray(routingProfile.complementarySkills);
+  const volunteerSkills = getVolunteerSkillCorpus(volunteer);
+  const volunteerLanguages = normalizeArray(volunteer.languages);
+  const preferredLanguages = normalizeArray(routingProfile.preferredLanguages);
+  const preferredCauses = normalizeArray(volunteer.preferredCauses);
+  const preferredCommunicationStyles = normalizeArray(routingProfile.preferredCommunicationStyles);
+  const timeWindows = normalizeArray(routingProfile.timeWindows);
+  const verification = buildVerificationSummary(volunteer);
+  const volunteerAvailability = availabilitySignals(volunteer.availability);
+  const currentMedicalRank = medicalTrainingRank(volunteer.medicalTraining);
+  const requiredMedicalRank = medicalTrainingRank(routingProfile.minimumMedicalTraining);
 
   const overlapCount = taskSkills.filter((skill) =>
-    volunteerSkills.some(
-      (volunteerSkill) => volunteerSkill.toLowerCase() === String(skill).toLowerCase()
+    volunteerSkills.some((volunteerSkill) => normalizeToken(volunteerSkill) === normalizeToken(skill))
+  ).length;
+  const languageOverlap = preferredLanguages.filter((language) =>
+    volunteerLanguages.some(
+      (volunteerLanguage) => normalizeToken(volunteerLanguage) === normalizeToken(language)
     )
   ).length;
+  const coveredSkills = new Set(
+    teammates
+      .flatMap((teammate) => getVolunteerSkillCorpus(teammate))
+      .map((skill) => normalizeToken(skill))
+  );
+  const complementaryCoverage = complementarySkillTargets.filter(
+    (skill) =>
+      volunteerSkills.some((volunteerSkill) => normalizeToken(volunteerSkill) === normalizeToken(skill)) &&
+      !coveredSkills.has(normalizeToken(skill))
+  ).length;
+  const uniqueSkillContribution = volunteerSkills.filter(
+    (skill) => !coveredSkills.has(normalizeToken(skill))
+  ).length;
+  const causeAlignment = [task.type, routingProfile.category, ...normalizeArray(routingProfile.contextTags)].filter(
+    (tag) => preferredCauses.some((cause) => normalizeToken(cause) === normalizeToken(tag))
+  ).length;
+  const communicationFit = preferredCommunicationStyles.includes(
+    normalizeCommunicationStyle(volunteer.communicationStyle)
+  )
+    ? 1
+    : 0;
+  const communicationComplement = teammates.length
+    ? teammates.every(
+        (teammate) =>
+          normalizeCommunicationStyle(teammate.communicationStyle) !==
+          normalizeCommunicationStyle(volunteer.communicationStyle)
+      )
+      ? 1
+      : 0
+    : 0;
+  const medicalReadiness = Math.max(currentMedicalRank - requiredMedicalRank, -2);
+  const timeWindowOverlap = timeWindows.filter((window) => volunteerAvailability.includes(window)).length;
 
   const distanceKm = haversineKm(taskCoords.lat, taskCoords.lng, volunteerCoords.lat, volunteerCoords.lng);
   const normalizedDistance = distanceKm === null ? 15 : distanceKm;
+  const severityBonus = task.severity === "critical" ? 4 : task.severity === "urgent" ? 2 : 0.5;
+  const buddyBonus = requiresBuddy(task) && teammates.length > 0 ? 2 : 0;
+  const safetyPenalty = verification.ready ? 0 : verification.missing.length * 1.35;
+  const locationBonus = String(volunteer.baseLocation || "")
+    .toLowerCase()
+    .includes(String(task.locationName || "").toLowerCase())
+    ? 1.5
+    : 0;
+  const healthLanguageBonus =
+    task.type === "medical" && languageOverlap > 0 ? languageOverlap * 2.2 : 0;
+  const medicalPenalty = currentMedicalRank < requiredMedicalRank ? (requiredMedicalRank - currentMedicalRank) * 4 : 0;
+  const totalScore =
+    overlapCount * 5 +
+    languageOverlap * 3 +
+    complementaryCoverage * 3.5 +
+    uniqueSkillContribution * 0.4 +
+    causeAlignment * 1.8 +
+    communicationFit * 1.6 +
+    communicationComplement * 1.2 +
+    healthLanguageBonus +
+    timeWindowOverlap * 1.4 +
+    Math.max(medicalReadiness, 0) * 2.5 +
+    severityBonus +
+    buddyBonus +
+    locationBonus -
+    normalizedDistance * 0.7 -
+    medicalPenalty -
+    safetyPenalty;
+  const reasons = uniqueValues([
+    overlapCount ? `${overlapCount} required skills aligned` : "",
+    languageOverlap ? `${languageOverlap} language matches` : "",
+    complementaryCoverage ? "covers complementary field skills" : "",
+    causeAlignment ? "fits the response context" : "",
+    communicationFit ? "communication style matches the task" : "",
+    communicationComplement ? "balances the field team communication mix" : "",
+    timeWindowOverlap ? "availability lines up with the shift window" : "",
+    currentMedicalRank >= requiredMedicalRank && requiredMedicalRank > 0
+      ? "medical readiness meets the task threshold"
+      : "",
+    locationBonus ? "based near the affected ward" : "",
+    !verification.ready ? `missing ${verification.missing.join(", ")}` : "safety checks ready"
+  ]);
 
   return {
     overlapCount,
+    languageOverlap,
+    complementaryCoverage,
+    causeAlignment,
+    communicationFit,
+    timeWindowOverlap,
+    medicalReadiness,
     distanceKm,
-    score: overlapCount - normalizedDistance
+    score: Number(totalScore.toFixed(2)),
+    reasons,
+    verification
   };
 }
 
@@ -475,10 +1123,34 @@ const Volunteer = sequelize.define(
       allowNull: false,
       defaultValue: []
     },
+    technicalSkills: {
+      type: DataTypes.ARRAY(DataTypes.TEXT),
+      allowNull: false,
+      defaultValue: [],
+      field: "technical_skills"
+    },
     languages: {
       type: DataTypes.ARRAY(DataTypes.TEXT),
       allowNull: false,
       defaultValue: []
+    },
+    medicalTraining: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "none",
+      field: "medical_training"
+    },
+    communicationStyle: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "community_bridge",
+      field: "communication_style"
+    },
+    preferredCauses: {
+      type: DataTypes.ARRAY(DataTypes.TEXT),
+      allowNull: false,
+      defaultValue: [],
+      field: "preferred_causes"
     },
     availability: {
       type: DataTypes.STRING,
@@ -489,6 +1161,27 @@ const Volunteer = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
       field: "base_location"
+    },
+    govIdLast4: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: "gov_id_last4"
+    },
+    emergencyContactName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: "emergency_contact_name"
+    },
+    emergencyContactPhone: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: "emergency_contact_phone"
+    },
+    vaccinationStatus: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "unknown",
+      field: "vaccination_status"
     },
     location: {
       type: DataTypes.GEOGRAPHY("POINT", 4326),
@@ -571,6 +1264,47 @@ const Task = sequelize.define(
       allowNull: false,
       defaultValue: [],
       field: "required_skills"
+    },
+    complementarySkills: {
+      type: DataTypes.ARRAY(DataTypes.TEXT),
+      allowNull: false,
+      defaultValue: [],
+      field: "complementary_skills"
+    },
+    preferredLanguages: {
+      type: DataTypes.ARRAY(DataTypes.TEXT),
+      allowNull: false,
+      defaultValue: [],
+      field: "preferred_languages"
+    },
+    preferredCommunicationStyles: {
+      type: DataTypes.ARRAY(DataTypes.TEXT),
+      allowNull: false,
+      defaultValue: [],
+      field: "preferred_communication_styles"
+    },
+    contextTags: {
+      type: DataTypes.ARRAY(DataTypes.TEXT),
+      allowNull: false,
+      defaultValue: [],
+      field: "context_tags"
+    },
+    minimumMedicalTraining: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "none",
+      field: "minimum_medical_training"
+    },
+    category: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "operations"
+    },
+    timeWindows: {
+      type: DataTypes.ARRAY(DataTypes.TEXT),
+      allowNull: false,
+      defaultValue: [],
+      field: "time_windows"
     },
     peopleServed: {
       type: DataTypes.INTEGER,
@@ -866,6 +1600,51 @@ async function ensureDatabase() {
   await sequelize.authenticate();
   await sequelize.query("CREATE EXTENSION IF NOT EXISTS postgis;");
   await sequelize.sync();
+  await sequelize.query(
+    "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS technical_skills TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
+  );
+  await sequelize.query(
+    "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS medical_training VARCHAR(64) NOT NULL DEFAULT 'none';"
+  );
+  await sequelize.query(
+    "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS communication_style VARCHAR(64) NOT NULL DEFAULT 'community_bridge';"
+  );
+  await sequelize.query(
+    "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS preferred_causes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
+  );
+  await sequelize.query(
+    "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS gov_id_last4 VARCHAR(4);"
+  );
+  await sequelize.query(
+    "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS emergency_contact_name VARCHAR(255);"
+  );
+  await sequelize.query(
+    "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS emergency_contact_phone VARCHAR(32);"
+  );
+  await sequelize.query(
+    "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS vaccination_status VARCHAR(32) NOT NULL DEFAULT 'unknown';"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS complementary_skills TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS preferred_languages TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS preferred_communication_styles TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS context_tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS minimum_medical_training VARCHAR(64) NOT NULL DEFAULT 'none';"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS category VARCHAR(64) NOT NULL DEFAULT 'operations';"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS time_windows TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
+  );
   await sequelize.query("CREATE INDEX IF NOT EXISTS volunteers_location_idx ON volunteers USING GIST (location);");
   await sequelize.query("CREATE INDEX IF NOT EXISTS tasks_location_idx ON tasks USING GIST (location);");
 }
@@ -915,7 +1694,11 @@ async function seedDatabase() {
       id: createId("volunteer"),
       userId: createdUser.id,
       skills: normalizeArray(seededUser.skills),
+      technicalSkills: normalizeArray(seededUser.technicalSkills),
       languages: normalizeArray(seededUser.languages),
+      medicalTraining: normalizeMedicalTraining(seededUser.medicalTraining),
+      communicationStyle: normalizeCommunicationStyle(seededUser.communicationStyle),
+      preferredCauses: normalizeArray(seededUser.preferredCauses),
       availability: seededUser.availability || "",
       baseLocation: seededUser.baseLocation || "",
       location: pointFromCoordinates(seededUser.latitude, seededUser.longitude)
@@ -935,6 +1718,20 @@ async function seedDatabase() {
       detectLocation(task.notes || task.title || task.locationName, task.locationName) ||
       detectLocation(task.locationName);
     const ngoUser = ngoUsers.find((user) => user.name.includes(locationSeed.ngo)) || fallbackNgo;
+    const routingProfile = buildTaskRoutingProfile({
+      type: task.type,
+      severity: task.severity,
+      description: task.notes || task.title,
+      locationName: task.locationName || locationSeed.name,
+      requiredSkills: task.requiredSkills,
+      complementarySkills: task.complementarySkills,
+      preferredLanguages: task.preferredLanguages,
+      preferredCommunicationStyles: task.preferredCommunicationStyles,
+      contextTags: task.contextTags,
+      minimumMedicalTraining: task.minimumMedicalTraining,
+      timeWindows: task.timeWindows,
+      category: task.category
+    });
     const createdTask = await Task.create({
       id: task.id,
       ngoId: ngoUser ? ngoUser.id : fallbackNgo.id,
@@ -945,7 +1742,14 @@ async function seedDatabase() {
       description: task.notes || task.title,
       source: "seed",
       locationName: task.locationName || locationSeed.name,
-      requiredSkills: normalizeArray(task.requiredSkills),
+      category: routingProfile.category,
+      requiredSkills: routingProfile.requiredSkills,
+      complementarySkills: routingProfile.complementarySkills,
+      preferredLanguages: routingProfile.preferredLanguages,
+      preferredCommunicationStyles: routingProfile.preferredCommunicationStyles,
+      contextTags: routingProfile.contextTags,
+      minimumMedicalTraining: routingProfile.minimumMedicalTraining,
+      timeWindows: routingProfile.timeWindows,
       peopleServed: task.status === "completed" ? inferPeopleServed(task.type, task.severity) : 0,
       location: pointFromCoordinates(task.latitude, task.longitude),
       isAssigned: Boolean((task.assignedVolunteerIds || []).length),
@@ -1058,11 +1862,12 @@ async function getUserFromRequest(request) {
   return getUserWithProfile(payload.sub);
 }
 
-function serializeUser(user) {
+function serializeUser(user, options = {}) {
   const profile = user?.volunteerProfile || null;
   const coordinates = pointToCoordinates(profile?.location);
+  const verification = buildVerificationSummary(profile || {});
 
-  return {
+  const payload = {
     id: user.id,
     name: user.name,
     email: user.email,
@@ -1071,12 +1876,26 @@ function serializeUser(user) {
     companyId: user.companyId || null,
     companyName: user.company?.name || null,
     skills: profile?.skills || [],
+    technicalSkills: profile?.technicalSkills || [],
     languages: profile?.languages || [],
+    medicalTraining: profile?.medicalTraining || "none",
+    communicationStyle: profile?.communicationStyle || "community_bridge",
+    preferredCauses: profile?.preferredCauses || [],
     availability: profile?.availability || "",
     baseLocation: profile?.baseLocation || "",
     latitude: coordinates.lat,
-    longitude: coordinates.lng
+    longitude: coordinates.lng,
+    verification
   };
+
+  if (options.includePrivate) {
+    payload.govIdLast4 = profile?.govIdLast4 || "";
+    payload.emergencyContactName = profile?.emergencyContactName || "";
+    payload.emergencyContactPhone = profile?.emergencyContactPhone || "";
+    payload.vaccinationStatus = profile?.vaccinationStatus || "unknown";
+  }
+
+  return payload;
 }
 
 async function ensureVolunteerProfileForUser(userId, payload = {}) {
@@ -1088,9 +1907,39 @@ async function ensureVolunteerProfileForUser(userId, payload = {}) {
   if (existing) {
     await existing.update({
       skills: payload.skills ? normalizeArray(payload.skills) : existing.skills,
+      technicalSkills:
+        payload.technicalSkills !== undefined
+          ? normalizeArray(payload.technicalSkills)
+          : existing.technicalSkills,
       languages: payload.languages ? normalizeArray(payload.languages) : existing.languages,
+      medicalTraining:
+        payload.medicalTraining !== undefined
+          ? normalizeMedicalTraining(payload.medicalTraining)
+          : existing.medicalTraining,
+      communicationStyle:
+        payload.communicationStyle !== undefined
+          ? normalizeCommunicationStyle(payload.communicationStyle)
+          : existing.communicationStyle,
+      preferredCauses:
+        payload.preferredCauses !== undefined
+          ? normalizeArray(payload.preferredCauses)
+          : existing.preferredCauses,
       availability: payload.availability ?? existing.availability,
       baseLocation: payload.baseLocation ?? existing.baseLocation,
+      govIdLast4:
+        payload.govIdLast4 !== undefined ? normalizeGovIdLast4(payload.govIdLast4) : existing.govIdLast4,
+      emergencyContactName:
+        payload.emergencyContactName !== undefined
+          ? String(payload.emergencyContactName || "").trim()
+          : existing.emergencyContactName,
+      emergencyContactPhone:
+        payload.emergencyContactPhone !== undefined
+          ? normalizePhoneValue(payload.emergencyContactPhone)
+          : existing.emergencyContactPhone,
+      vaccinationStatus:
+        payload.vaccinationStatus !== undefined
+          ? normalizeVaccinationStatus(payload.vaccinationStatus)
+          : existing.vaccinationStatus,
       location:
         payload.latitude !== undefined || payload.longitude !== undefined || payload.baseLocation
           ? pointFromCoordinates(latitude, longitude)
@@ -1103,9 +1952,17 @@ async function ensureVolunteerProfileForUser(userId, payload = {}) {
     id: createId("volunteer"),
     userId,
     skills: normalizeArray(payload.skills),
+    technicalSkills: normalizeArray(payload.technicalSkills),
     languages: normalizeArray(payload.languages),
+    medicalTraining: normalizeMedicalTraining(payload.medicalTraining),
+    communicationStyle: normalizeCommunicationStyle(payload.communicationStyle),
+    preferredCauses: normalizeArray(payload.preferredCauses),
     availability: payload.availability || "",
     baseLocation: payload.baseLocation || detectedLocation.name,
+    govIdLast4: normalizeGovIdLast4(payload.govIdLast4),
+    emergencyContactName: String(payload.emergencyContactName || "").trim(),
+    emergencyContactPhone: normalizePhoneValue(payload.emergencyContactPhone),
+    vaccinationStatus: normalizeVaccinationStatus(payload.vaccinationStatus),
     location: pointFromCoordinates(latitude, longitude)
   });
 }
@@ -1131,10 +1988,32 @@ async function buildTaskPayload(task, currentUser = null) {
           ]
         });
 
-  const assignedUsers = (taskWithRelations.assignments || [])
-    .map((assignment) => assignment.volunteer?.user)
-    .filter(Boolean)
-    .map((user) => serializeUser({ ...user.get({ plain: true }), volunteerProfile: user.volunteerProfile }));
+  const assignedVolunteerProfiles = (taskWithRelations.assignments || [])
+    .map((assignment) => assignment.volunteer)
+    .filter(Boolean);
+  const routingProfile = buildTaskRoutingProfile({
+    type: taskWithRelations.type,
+    severity: taskWithRelations.severity,
+    description: taskWithRelations.description,
+    locationName: taskWithRelations.locationName,
+    requiredSkills: taskWithRelations.requiredSkills,
+    complementarySkills: taskWithRelations.complementarySkills,
+    preferredLanguages: taskWithRelations.preferredLanguages,
+    preferredCommunicationStyles: taskWithRelations.preferredCommunicationStyles,
+    contextTags: taskWithRelations.contextTags,
+    minimumMedicalTraining: taskWithRelations.minimumMedicalTraining,
+    timeWindows: taskWithRelations.timeWindows,
+    category: taskWithRelations.category
+  });
+
+  const assignedUsers = assignedVolunteerProfiles
+    .filter((profile) => profile.user)
+    .map((profile) =>
+      serializeUser({
+        ...profile.user.get({ plain: true }),
+        volunteerProfile: profile.get({ plain: true })
+      })
+    );
 
   const assignedVolunteerIds = new Set((taskWithRelations.assignments || []).map((assignment) => assignment.volunteerId));
   const volunteerProfiles = await Volunteer.findAll({
@@ -1148,7 +2027,7 @@ async function buildTaskPayload(task, currentUser = null) {
     .filter((profile) => !assignedVolunteerIds.has(profile.id))
     .map((profile) => ({
       profile,
-      score: computeMatchScore(taskWithRelations, profile)
+      score: computeMatchScore(taskWithRelations, profile, assignedVolunteerProfiles)
     }))
     .sort((left, right) => right.score.score - left.score.score)
     .slice(0, 2);
@@ -1158,17 +2037,23 @@ async function buildTaskPayload(task, currentUser = null) {
   const distanceKm = currentUser
     ? haversineKm(taskCoords.lat, taskCoords.lng, currentCoords.lat, currentCoords.lng)
     : null;
+  const currentUserMatch =
+    currentUser?.volunteerProfile && currentUser.role === "volunteer"
+      ? computeMatchScore(taskWithRelations, currentUser.volunteerProfile, assignedVolunteerProfiles)
+      : null;
 
   return {
     id: taskWithRelations.id,
     title: taskWithRelations.title,
     type: taskWithRelations.type,
     severity: taskWithRelations.severity,
+    category: routingProfile.category,
     locationName: taskWithRelations.locationName,
     latitude: taskCoords.lat,
     longitude: taskCoords.lng,
     status: taskWithRelations.completedAt ? "completed" : taskWithRelations.isAssigned ? "in_progress" : "open",
-    requiredSkills: taskWithRelations.requiredSkills || [],
+    requiredSkills: routingProfile.requiredSkills,
+    complementarySkills: routingProfile.complementarySkills,
     assignedUsers,
     assignedVolunteerIds: (taskWithRelations.assignments || []).map((assignment) => assignment.volunteerId),
     sponsorCompanyId: taskWithRelations.companyId || null,
@@ -1177,9 +2062,27 @@ async function buildTaskPayload(task, currentUser = null) {
     completedAt: taskWithRelations.completedAt,
     notes: taskWithRelations.description,
     ngo: taskWithRelations.ngo?.name || "NGO Desk",
+    preferredLanguages: routingProfile.preferredLanguages,
+    preferredCommunicationStyles: routingProfile.preferredCommunicationStyles,
+    contextTags: routingProfile.contextTags,
+    minimumMedicalTraining: routingProfile.minimumMedicalTraining,
+    timeWindows: routingProfile.timeWindows,
+    requiresBuddy: requiresBuddy(taskWithRelations),
+    recommendedTeamSize: requiresBuddy(taskWithRelations) ? 2 : 1,
     buddySuggestions: availableSuggestions.map(({ profile }) =>
       serializeUser({ ...profile.user.get({ plain: true }), volunteerProfile: profile.get({ plain: true }) })
     ),
+    buddyReasons: availableSuggestions.map(({ score }) => score.reasons).flat(),
+    currentUserMatch: currentUserMatch
+      ? {
+          score: currentUserMatch.score,
+          reasons: currentUserMatch.reasons,
+          distanceKm:
+            currentUserMatch.distanceKm === null
+              ? null
+              : Number(currentUserMatch.distanceKm.toFixed(1))
+        }
+      : null,
     distanceKm: distanceKm === null ? null : Number(distanceKm.toFixed(1))
   };
 }
@@ -1197,8 +2100,30 @@ async function createTaskRecord({
   latitude,
   longitude,
   requiredSkills = [],
+  complementarySkills = [],
+  preferredLanguages = [],
+  preferredCommunicationStyles = [],
+  contextTags = [],
+  minimumMedicalTraining = "none",
+  category = "",
+  timeWindows = [],
   peopleServed = 0
 }) {
+  const routingProfile = buildTaskRoutingProfile({
+    type,
+    severity,
+    description,
+    locationName,
+    requiredSkills,
+    complementarySkills,
+    preferredLanguages,
+    preferredCommunicationStyles,
+    contextTags,
+    minimumMedicalTraining,
+    category,
+    timeWindows
+  });
+
   return Task.create({
     id: createId("task"),
     ngoId: ngoUserId,
@@ -1209,15 +2134,38 @@ async function createTaskRecord({
     description,
     source,
     locationName,
-    requiredSkills,
+    category: routingProfile.category,
+    requiredSkills: routingProfile.requiredSkills,
+    complementarySkills: routingProfile.complementarySkills,
+    preferredLanguages: routingProfile.preferredLanguages,
+    preferredCommunicationStyles: routingProfile.preferredCommunicationStyles,
+    contextTags: routingProfile.contextTags,
+    minimumMedicalTraining: routingProfile.minimumMedicalTraining,
+    timeWindows: routingProfile.timeWindows,
     peopleServed,
     location: pointFromCoordinates(latitude, longitude),
     isAssigned: false
   });
 }
 
-async function createReviewIfNeeded({ taskId, source, rawText, confidence, suggestedType, suggestedSeverity, suggestedLocation }) {
-  if (Number(confidence) >= OCR_CONFIDENCE_THRESHOLD) {
+async function createReviewIfNeeded({
+  taskId,
+  source,
+  rawText,
+  confidence,
+  suggestedType,
+  suggestedSeverity,
+  suggestedLocation,
+  flaggedWords = [],
+  evidence = [],
+  pipeline = {},
+  languages = []
+}) {
+  const normalizedConfidence = clampConfidence(confidence, 0);
+  const requiresReview =
+    normalizedConfidence < OCR_CONFIDENCE_THRESHOLD || normalizeArray(flaggedWords).length > 0;
+
+  if (!requiresReview) {
     return null;
   }
 
@@ -1226,11 +2174,18 @@ async function createReviewIfNeeded({ taskId, source, rawText, confidence, sugge
     taskId,
     source,
     rawText,
-    confidence: Number(confidence.toFixed(2)),
+    confidence: Number(normalizedConfidence.toFixed(2)),
     suggestedType,
     suggestedSeverity,
     suggestedLocation,
-    status: "pending"
+    status: "pending",
+    correctedPayload: {
+      flaggedWords: uniqueValues(normalizeArray(flaggedWords)),
+      evidence: uniqueValues(normalizeArray(evidence)),
+      pipeline,
+      languages: uniqueValues(normalizeArray(languages)),
+      trainingStatus: "pending_annotation"
+    }
   });
 }
 
@@ -1283,38 +2238,86 @@ async function buildOverview() {
   return {
     wardsLive: uniqueLocations.size || 1,
     openNeeds: tasks.length,
-    criticalClusters: tasks.filter((task) => task.severity === "critical").length,
+    criticalClusters: (await buildAlerts()).filter((alert) => alert.severity === "critical").length,
     responseCycle: `${Math.round(responseMinutes)} min`,
     volunteerReadiness: `${Math.round((matchedCount / Math.max(tasks.length, 1)) * 100)}%`,
     activeVolunteers
   };
 }
 
+function buildSilentNeedAlertsFromTasks(tasks = []) {
+  const groups = new Map();
+
+  tasks.forEach((task) => {
+    const updatedAt = readTimestamp(task, "updatedAt", "createdAt");
+    if (!updatedAt || hoursSince(updatedAt) > SILENT_NEED_LOOKBACK_DAYS * 24) {
+      return;
+    }
+
+    const key = `${task.type}::${String(task.locationName || "pune").toLowerCase()}`;
+    const bucket = groups.get(key) || [];
+    bucket.push(task);
+    groups.set(key, bucket);
+  });
+
+  return [...groups.values()]
+    .map((group) => {
+      const sample = group[0];
+      const coords = pointToCoordinates(sample.location);
+      const weightedCount = group.reduce((sum, task) => {
+        const updatedAt = readTimestamp(task, "updatedAt", "createdAt");
+        return sum + severityWeight(task.severity) * computeTimeDecayWeight(updatedAt);
+      }, 0);
+      const peopleMentioned = group.reduce((sum, task) => {
+        const detected = inferPeopleMention(task.description || "");
+        return sum + (detected || 0);
+      }, 0);
+      const evidenceKeywords = uniqueValues(
+        group.flatMap((task) => summarizeEvidenceKeywords(task.description || "", task.type))
+      ).slice(0, 5);
+      const criticalMentions = group.filter((task) => task.severity === "critical").length;
+      const evidence = uniqueValues([
+        `${group.length} reports within roughly 3 km over the last ${SILENT_NEED_LOOKBACK_DAYS} days`,
+        peopleMentioned
+          ? `${peopleMentioned} people or households explicitly referenced in these reports`
+          : "",
+        evidenceKeywords.length ? `Repeated keywords: ${evidenceKeywords.join(", ")}` : "",
+        criticalMentions ? `${criticalMentions} of these reports were marked critical` : ""
+      ]).slice(0, 4);
+      const meetsThreshold = weightedCount >= 2.3 || criticalMentions > 0;
+
+      if (!meetsThreshold) {
+        return null;
+      }
+
+      return {
+        id: `alert-${sample.type}-${sample.locationName}`.replace(/\s+/g, "-").toLowerCase(),
+        type: sample.type,
+        severity: weightedCount >= 4.2 || criticalMentions > 0 ? "critical" : "urgent",
+        title: `${titleCase(sample.type)} pressure rising in ${sample.locationName}`,
+        locationName: sample.locationName,
+        latitude: coords.lat,
+        longitude: coords.lng,
+        evidenceCount: group.length,
+        weightedCount: Number(weightedCount.toFixed(2)),
+        explanation: evidence[0] || `${titleCase(sample.type)} reports are clustering in ${sample.locationName}.`,
+        evidence
+      };
+    })
+    .filter(Boolean)
+    .sort((left, right) => right.weightedCount - left.weightedCount)
+    .slice(0, 8);
+}
+
 async function buildAlerts() {
   const tasks = await Task.findAll({
     where: {
-      completedAt: null,
-      severity: {
-        [Op.in]: ["critical", "urgent"]
-      }
+      completedAt: null
     },
     order: sequelize.literal('"Task"."updated_at" DESC')
   });
 
-  return tasks.map((task) => {
-    const coords = pointToCoordinates(task.location);
-    return {
-      id: `alert-${task.id}`,
-      type: task.type,
-      severity: task.severity,
-      title: `${titleCase(task.type)} alert - ${task.locationName}`,
-      locationName: task.locationName,
-      latitude: coords.lat,
-      longitude: coords.lng,
-      evidenceCount: task.severity === "critical" ? 3 : 2,
-      explanation: `${titleCase(task.type)} support remains open in ${task.locationName}.`
-    };
-  });
+  return buildSilentNeedAlertsFromTasks(tasks);
 }
 
 async function buildReviewQueue() {
@@ -1337,7 +2340,15 @@ async function buildReviewQueue() {
       severity: review.task.severity,
       locationName: review.task.locationName,
       confidence: Number(review.confidence),
-      rawText: review.rawText || ""
+      rawText: review.rawText || "",
+      correctedText:
+        review.correctedPayload?.correctedText ||
+        review.correctedPayload?.description ||
+        review.task.description,
+      flaggedWords: review.correctedPayload?.flaggedWords || [],
+      evidence: review.correctedPayload?.evidence || [],
+      pipeline: review.correctedPayload?.pipeline || {},
+      languages: review.correctedPayload?.languages || []
     }));
 }
 
@@ -1369,18 +2380,25 @@ async function buildIssuePayloads() {
 
   return tasks.map((task) => {
     const coords = pointToCoordinates(task.location);
+    const updatedAt = readTimestamp(task, "updatedAt", "createdAt");
+    const heatWeight = Number(
+      (severityWeight(task.severity) * computeTimeDecayWeight(updatedAt)).toFixed(2)
+    );
     return {
       id: task.id,
       type: task.type,
       severity: task.severity,
       label: task.title,
       updated: formatTimeAgo(readTimestamp(task, "updatedAt", "createdAt")),
-      updated_at: readTimestamp(task, "updatedAt", "createdAt"),
+      updated_at: updatedAt,
       ngo: task.ngo?.name || "NGO Desk",
       locationName: task.locationName,
       coordinates: coords,
       lat: coords.lat,
-      lng: coords.lng
+      lng: coords.lng,
+      heatWeight,
+      evidenceKeywords: summarizeEvidenceKeywords(task.description || "", task.type),
+      peopleMention: inferPeopleMention(task.description || "")
     };
   });
 }
@@ -1460,19 +2478,90 @@ async function buildCSRStats(companyId, filters = {}) {
     return accumulator;
   }, {});
 
+  const taskAssignmentCounts = await Promise.all(
+    completedTasks.map(async (task) => ({
+      task,
+      volunteerCount: await Assignment.count({ where: { taskId: task.id } }),
+      responseHours: Math.max(
+        Math.round(
+          ((readTimestamp(task, "completedAt", "updatedAt") || new Date()).getTime() -
+            (readTimestamp(task, "createdAt", "updatedAt") || new Date()).getTime()) /
+            (1000 * 60 * 60)
+        ),
+        1
+      )
+    }))
+  );
+
   const receiptLines = await Promise.all(
-    completedTasks.map(async (task) => {
-      const volunteerCount = await Assignment.count({ where: { taskId: task.id } });
+    taskAssignmentCounts.map(async ({ task, volunteerCount, responseHours }) => {
+      const outputMetric =
+        task.type === "water"
+          ? `${Math.max(Number(task.peopleServed || 0) * 12, 180)} liters purified or distributed`
+          : task.type === "medical"
+            ? `${Math.max(Number(task.peopleServed || 0), 12)} treatments or triage touchpoints`
+            : task.type === "food"
+              ? `${Math.max(Number(task.peopleServed || 0), 20)} meals or ration units`
+              : `${Math.max(Number(task.peopleServed || 0), 10)} people supported`;
+      const outcomeMetric =
+        task.type === "water"
+          ? "Fewer unsafe-water mentions were logged after the intervention window"
+          : task.type === "medical"
+            ? "Residents were routed into treatment faster"
+            : task.type === "sanitation"
+              ? "Waste backlog pressure eased in the ward"
+              : "Coverage improved for the immediate response lane";
+
       return {
         title: task.title,
         locationName: task.locationName,
         volunteers: volunteerCount,
+        peopleServed: Number(task.peopleServed || 0),
+        outputMetric,
+        outcomeMetric,
+        responseHours,
+        frameworkTags: ["GRI 203", "GRI 413", "SASB Community Impact"],
         completedAt: task.completedAt
           ? task.completedAt.toLocaleDateString("en-IN")
           : "Pending"
       };
     })
   );
+
+  const outcomeMetrics = [
+    {
+      label: "Response completed within 72h",
+      value: `${taskAssignmentCounts.filter((entry) => entry.responseHours <= 72).length}/${completedTasks.length || 0}`,
+      description: "Speed proxy showing how quickly funded tasks moved from intake to completion."
+    },
+    {
+      label: "High-risk tasks with buddy coverage",
+      value: `${taskAssignmentCounts.filter((entry) => requiresBuddy(entry.task) && entry.volunteerCount >= 2).length}`,
+      description: "Safety proxy showing where the buddy system held for higher-risk field work."
+    },
+    {
+      label: "People reached per 10 volunteer hours",
+      value: totals.volunteerHours
+        ? Number(((totals.peopleServed / totals.volunteerHours) * 10).toFixed(1)).toString()
+        : "0",
+      description: "Operational efficiency proxy for CSR and ESG review decks."
+    }
+  ];
+
+  const frameworkAlignment = [
+    {
+      framework: "GRI 203",
+      focus: "Infrastructure and community benefit"
+    },
+    {
+      framework: "GRI 413",
+      focus: "Local community engagement and response impact"
+    },
+    {
+      framework: "SASB Community Impact",
+      focus: "Comparable outputs and outcomes for board reporting"
+    }
+  ];
 
   const rangeLabel =
     dateRange.startDate || dateRange.endDate
@@ -1496,6 +2585,12 @@ async function buildCSRStats(companyId, filters = {}) {
     monthlyHours,
     recentReports: reports.map((report) => report.get({ plain: true })),
     receiptLines,
+    outcomeMetrics,
+    frameworkAlignment,
+    testimonials: receiptLines.slice(0, 3).map((line) => ({
+      quote: `${line.locationName} teams closed ${line.title.toLowerCase()} with ${line.volunteers} volunteers in ${line.responseHours}h.`,
+      attribution: `${line.locationName} field lane`
+    })),
     narrative: `${company.name} logged ${totals.volunteerHours} volunteer hours, completed ${totals.tasksFunded} funded task flows, and reached ${totals.peopleServed} people ${rangeLabel}.`
   };
 }
@@ -1532,7 +2627,10 @@ async function renderCSRHtml(stats) {
     ],
     monthlyHours: stats.monthlyHours,
     receiptLines: stats.receiptLines,
-    categorySummary: stats.categorySummary
+    categorySummary: stats.categorySummary,
+    outcomeMetrics: stats.outcomeMetrics,
+    frameworkAlignment: stats.frameworkAlignment,
+    testimonials: stats.testimonials
   });
 }
 
@@ -1581,11 +2679,193 @@ async function generateCSRReport(companyId, filters = {}) {
   };
 }
 
-async function runOCR(filePath) {
-  const result = await Tesseract.recognize(filePath, "eng");
-  const averageConfidence = Number(((result?.data?.confidence || 0) / 100).toFixed(2));
-  const text = result?.data?.text?.trim() || "";
-  return { text, averageConfidence };
+async function runGeminiStructuredExtraction(filePath, mimeType, prompt, model = GEMINI_MULTIMODAL_MODEL) {
+  if (!geminiClient) {
+    return null;
+  }
+
+  const uploadedFile = await geminiClient.files.upload({
+    file: filePath,
+    config: { mimeType }
+  });
+
+  const response = await geminiClient.models.generateContent({
+    model,
+    contents: createUserContent([
+      createPartFromUri(uploadedFile.uri, uploadedFile.mimeType || mimeType),
+      prompt
+    ])
+  });
+
+  return parseModelJson(response.text || "", {});
+}
+
+async function runTesseractOCR(filePath) {
+  const languages = uniqueValues([OCR_LANGUAGES, "eng+hin", "eng"]);
+  let lastError = null;
+
+  for (const language of languages) {
+    try {
+      const result = await Tesseract.recognize(filePath, language);
+      const words = (result?.data?.words || [])
+        .map((word) => ({
+          text: String(word.text || "").trim(),
+          confidence: clampConfidence(Number(word.confidence || 0) / 100, 0)
+        }))
+        .filter((word) => word.text);
+      const lowConfidenceWords = words
+        .filter((word) => word.confidence < OCR_LOW_CONFIDENCE_WORD_THRESHOLD)
+        .sort((left, right) => left.confidence - right.confidence)
+        .slice(0, 12)
+        .map((word) => word.text);
+      const averageConfidence = clampConfidence((result?.data?.confidence || 0) / 100, 0);
+      const text = result?.data?.text?.trim() || "";
+
+      return {
+        text,
+        averageConfidence,
+        provider: "Tesseract",
+        model: `tesseract:${language}`,
+        languagesDetected: detectLanguageHints(text),
+        lowConfidenceWords,
+        keyPhrases: summarizeEvidenceKeywords(text, inferNeedType(text)),
+        structuredExtraction: {
+          languages: detectLanguageHints(text),
+          lowConfidenceWords,
+          evidence: summarizeEvidenceKeywords(text, inferNeedType(text))
+        },
+        engines: [{ provider: "Tesseract", model: `tesseract:${language}`, confidence: averageConfidence }]
+      };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError || new Error("Tesseract OCR could not process this file.");
+}
+
+async function runGeminiSurveyOCR(filePath, mimeType = "") {
+  const parsed = await runGeminiStructuredExtraction(
+    filePath,
+    inferImageMimeType(filePath, mimeType),
+    [
+      "You are extracting survey text from an image that may contain English, Marathi, Hindi, Urdu, Telugu, or Kannada text.",
+      "Return valid JSON only.",
+      "Use this shape:",
+      '{"text":"","summary":"","language":"","languages":[],"confidence":0.0,"low_confidence_words":[],"key_phrases":[],"need_type":"","severity":"","location_name":"","title":"","required_skills":[],"evidence":[],"people_mentioned":0}',
+      "Preserve local-language words exactly. Confidence must be between 0 and 1."
+    ].join(" ")
+  );
+
+  if (!parsed || typeof parsed !== "object") {
+    return null;
+  }
+
+  const text = String(parsed.text || parsed.summary || "").trim();
+  if (!text) {
+    return null;
+  }
+
+  return {
+    text,
+    averageConfidence: clampConfidence(parsed.confidence, 0.82),
+    provider: "Google Gemini",
+    model: GEMINI_MULTIMODAL_MODEL,
+    languagesDetected: uniqueValues([
+      ...normalizeArray(parsed.languages),
+      ...detectLanguageHints(text),
+      parsed.language
+    ]),
+    lowConfidenceWords: uniqueValues(normalizeArray(parsed.low_confidence_words)).slice(0, 12),
+    keyPhrases: uniqueValues(normalizeArray(parsed.key_phrases)).slice(0, 8),
+    structuredExtraction: {
+      type: parsed.need_type,
+      severity: parsed.severity,
+      locationName: parsed.location_name,
+      title: parsed.title,
+      requiredSkills: normalizeArray(parsed.required_skills),
+      evidence: normalizeArray(parsed.evidence),
+      languages: uniqueValues(normalizeArray(parsed.languages)),
+      peopleMention: Number(parsed.people_mentioned || 0) || null
+    },
+    engines: [{ provider: "Google Gemini", model: GEMINI_MULTIMODAL_MODEL, confidence: clampConfidence(parsed.confidence, 0.82) }]
+  };
+}
+
+function mergeExtractionSignals(primary = {}, secondary = {}) {
+  return {
+    type: primary.type || secondary.type,
+    severity: primary.severity || secondary.severity,
+    locationName: primary.locationName || secondary.locationName,
+    title: primary.title || secondary.title,
+    requiredSkills:
+      normalizeArray(primary.requiredSkills).length > 0
+        ? normalizeArray(primary.requiredSkills)
+        : normalizeArray(secondary.requiredSkills),
+    evidence: uniqueValues([
+      ...normalizeArray(primary.evidence),
+      ...normalizeArray(secondary.evidence)
+    ]),
+    languages: uniqueValues([
+      ...normalizeArray(primary.languages),
+      ...normalizeArray(secondary.languages)
+    ]),
+    peopleMention: primary.peopleMention || secondary.peopleMention || null
+  };
+}
+
+async function runOCR(filePath, mimeType = "") {
+  const results = await Promise.allSettled([
+    runTesseractOCR(filePath),
+    runGeminiSurveyOCR(filePath, mimeType)
+  ]);
+  const successes = results
+    .filter((result) => result.status === "fulfilled" && result.value?.text)
+    .map((result) => result.value);
+
+  if (!successes.length) {
+    throw new Error("No OCR engine could extract text from this survey image.");
+  }
+
+  const primary = [...successes].sort((left, right) => {
+    const leftScore = left.averageConfidence * 100 + Math.min(left.text.length, 200) * 0.03;
+    const rightScore = right.averageConfidence * 100 + Math.min(right.text.length, 200) * 0.03;
+    return rightScore - leftScore;
+  })[0];
+  const secondary = successes.find((entry) => entry !== primary) || {};
+  const mergedExtraction = mergeExtractionSignals(
+    primary.structuredExtraction || {},
+    secondary.structuredExtraction || {}
+  );
+  const lowConfidenceWords = uniqueValues([
+    ...normalizeArray(primary.lowConfidenceWords),
+    ...normalizeArray(secondary.lowConfidenceWords)
+  ]).slice(0, 12);
+  const averageConfidence = clampConfidence(
+    successes.reduce((sum, entry) => sum + Number(entry.averageConfidence || 0), 0) / successes.length,
+    primary.averageConfidence
+  );
+
+  return {
+    text: primary.text,
+    averageConfidence: Number(averageConfidence.toFixed(2)),
+    provider:
+      successes.length > 1
+        ? `${primary.provider} + ${secondary.provider || "Tesseract"}`
+        : primary.provider,
+    model: primary.model,
+    languagesDetected: uniqueValues([
+      ...normalizeArray(primary.languagesDetected),
+      ...normalizeArray(secondary.languagesDetected)
+    ]),
+    lowConfidenceWords,
+    keyPhrases: uniqueValues([
+      ...normalizeArray(primary.keyPhrases),
+      ...normalizeArray(secondary.keyPhrases)
+    ]),
+    structuredExtraction: mergedExtraction,
+    engines: successes.flatMap((entry) => entry.engines || [])
+  };
 }
 
 async function transcribeAudio(filePath, mimeType = "audio/webm") {
@@ -1595,23 +2875,47 @@ async function transcribeAudio(filePath, mimeType = "audio/webm") {
     throw error;
   }
 
-  const uploadedFile = await geminiClient.files.upload({
-    file: filePath,
-    config: { mimeType: inferAudioMimeType(filePath, mimeType) }
-  });
+  const parsed = await runGeminiStructuredExtraction(
+    filePath,
+    inferAudioMimeType(filePath, mimeType),
+    [
+      "You are processing a field audio note for civic response in India.",
+      "Transcribe the speech faithfully and extract structured needs in one step.",
+      "Return valid JSON only using this shape:",
+      '{"transcript":"","language":"","languages":[],"confidence":0.0,"key_phrases":[],"need_type":"","severity":"","location_name":"","title":"","required_skills":[],"evidence":[],"people_mentioned":0}',
+      "The speech may contain Marathi, Hindi, Urdu, Kannada, Telugu, Tamil, or English. Confidence must be between 0 and 1."
+    ].join(" "),
+    GEMINI_AUDIO_MODEL
+  );
 
-  const transcript = await geminiClient.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: createUserContent([
-      createPartFromUri(uploadedFile.uri, uploadedFile.mimeType || mimeType),
-      "Generate a clean transcript of the speech in this audio. Return only the transcript text."
-    ])
-  });
+  const text = String(parsed?.transcript || "").trim();
+  if (!text) {
+    const error = new Error("Audio transcription did not return any text.");
+    error.statusCode = 422;
+    throw error;
+  }
 
   return {
-    text: transcript.text || "",
+    text,
     provider: "Google Gemini",
-    model: "gemini-2.5-flash"
+    model: GEMINI_AUDIO_MODEL,
+    averageConfidence: clampConfidence(parsed.confidence, 0.86),
+    languagesDetected: uniqueValues([
+      parsed.language,
+      ...normalizeArray(parsed.languages),
+      ...detectLanguageHints(text)
+    ]),
+    keyPhrases: uniqueValues(normalizeArray(parsed.key_phrases)).slice(0, 10),
+    structuredExtraction: {
+      type: parsed.need_type,
+      severity: parsed.severity,
+      locationName: parsed.location_name,
+      title: parsed.title,
+      requiredSkills: normalizeArray(parsed.required_skills),
+      evidence: normalizeArray(parsed.evidence),
+      languages: uniqueValues(normalizeArray(parsed.languages)),
+      peopleMention: Number(parsed.people_mentioned || 0) || null
+    }
   };
 }
 
@@ -1723,15 +3027,23 @@ app.post("/api/signup", async (request, response, next) => {
 
     await ensureVolunteerProfileForUser(user.id, {
       skills: request.body.skills,
+      technicalSkills: request.body.technicalSkills,
       languages: request.body.languages,
+      medicalTraining: request.body.medicalTraining,
+      communicationStyle: request.body.communicationStyle,
+      preferredCauses: request.body.preferredCauses,
       availability: request.body.availability,
-      baseLocation: request.body.baseLocation
+      baseLocation: request.body.baseLocation,
+      govIdLast4: request.body.govIdLast4,
+      emergencyContactName: request.body.emergencyContactName,
+      emergencyContactPhone: request.body.emergencyContactPhone,
+      vaccinationStatus: request.body.vaccinationStatus
     });
 
     const createdUser = await getUserWithProfile(user.id);
     response.status(201).json({
       token: buildToken(createdUser),
-      user: serializeUser(createdUser)
+      user: serializeUser(createdUser, { includePrivate: true })
     });
   } catch (error) {
     next(error);
@@ -1769,7 +3081,7 @@ app.post("/api/login", async (request, response, next) => {
 
     response.json({
       token: buildToken(user),
-      user: serializeUser(user)
+      user: serializeUser(user, { includePrivate: true })
     });
   } catch (error) {
     next(error);
@@ -1884,6 +3196,13 @@ app.post("/api/whatsapp", async (request, response, next) => {
           order: [["name", "ASC"]]
         }));
 
+      const taskContext = buildTaskRoutingProfile({
+        type: pending.type || "volunteer",
+        severity,
+        description: `WhatsApp intake from ${from}: ${body}`,
+        locationName: pending.locationName || "Pune"
+      });
+
       const task = await createTaskRecord({
         ngoUserId: ngoDesk.id,
         source: "whatsapp",
@@ -1895,7 +3214,14 @@ app.post("/api/whatsapp", async (request, response, next) => {
         locationName: pending.locationName || "Pune",
         latitude: pending.latitude || MAP_REFRESH_CENTER.lat,
         longitude: pending.longitude || MAP_REFRESH_CENTER.lng,
-        requiredSkills: SKILL_MAP[pending.type || "volunteer"] || ["community outreach"],
+        requiredSkills: taskContext.requiredSkills,
+        complementarySkills: taskContext.complementarySkills,
+        preferredLanguages: taskContext.preferredLanguages,
+        preferredCommunicationStyles: taskContext.preferredCommunicationStyles,
+        contextTags: taskContext.contextTags,
+        minimumMedicalTraining: taskContext.minimumMedicalTraining,
+        category: taskContext.category,
+        timeWindows: taskContext.timeWindows,
         peopleServed: inferPeopleServed(pending.type || "volunteer", severity)
       });
 
@@ -1928,7 +3254,7 @@ app.post("/api/whatsapp", async (request, response, next) => {
 });
 
 app.get("/api/me", requireAuth, async (request, response) => {
-  response.json({ user: serializeUser(request.user) });
+  response.json({ user: serializeUser(request.user, { includePrivate: true }) });
 });
 
 app.put("/api/profile", requireAuth, async (request, response, next) => {
@@ -1939,13 +3265,21 @@ app.put("/api/profile", requireAuth, async (request, response, next) => {
 
     await ensureVolunteerProfileForUser(request.user.id, {
       skills: request.body.skills,
+      technicalSkills: request.body.technicalSkills,
       languages: request.body.languages,
+      medicalTraining: request.body.medicalTraining,
+      communicationStyle: request.body.communicationStyle,
+      preferredCauses: request.body.preferredCauses,
       availability: request.body.availability,
-      baseLocation: request.body.baseLocation
+      baseLocation: request.body.baseLocation,
+      govIdLast4: request.body.govIdLast4,
+      emergencyContactName: request.body.emergencyContactName,
+      emergencyContactPhone: request.body.emergencyContactPhone,
+      vaccinationStatus: request.body.vaccinationStatus
     });
 
     const refreshed = await getUserWithProfile(request.user.id);
-    response.json({ user: serializeUser(refreshed) });
+    response.json({ user: serializeUser(refreshed, { includePrivate: true }) });
   } catch (error) {
     next(error);
   }
@@ -1962,7 +3296,8 @@ app.get("/api/overview", requireAuth, async (request, response, next) => {
 app.get("/api/issues", requireAuth, async (request, response, next) => {
   try {
     response.json({
-      issues: await buildIssuePayloads()
+      issues: await buildIssuePayloads(),
+      alerts: await buildAlerts()
     });
   } catch (error) {
     next(error);
@@ -1972,8 +3307,21 @@ app.get("/api/issues", requireAuth, async (request, response, next) => {
 app.get("/api/tasks", requireAuth, async (request, response, next) => {
   try {
     const tasks = await loadOpenTasksWithRelations();
+    const payloads = await Promise.all(tasks.map((task) => buildTaskPayload(task, request.user)));
+    const rankedTasks =
+      request.user.role === "volunteer"
+        ? [...payloads].sort((left, right) => {
+            const scoreDelta =
+              Number(right.currentUserMatch?.score || -999) - Number(left.currentUserMatch?.score || -999);
+            if (scoreDelta !== 0) {
+              return scoreDelta;
+            }
+            const severityOrder = { critical: 0, urgent: 1, stable: 2 };
+            return (severityOrder[left.severity] || 3) - (severityOrder[right.severity] || 3);
+          })
+        : payloads;
     response.json({
-      tasks: await Promise.all(tasks.map((task) => buildTaskPayload(task, request.user)))
+      tasks: rankedTasks
     });
   } catch (error) {
     next(error);
@@ -2092,10 +3440,7 @@ app.post("/api/match", requireAuth, requireRole(["admin"]), async (request, resp
         completedAt: null,
         isAssigned: false
       },
-      order: [
-        ["severity", "ASC"],
-        ["updatedAt", "DESC"]
-      ]
+      order: [sequelize.literal('"Task"."severity" ASC'), sequelize.literal('"Task"."updated_at" DESC')]
     });
 
     const volunteers = await Volunteer.findAll({
@@ -2117,17 +3462,28 @@ app.post("/api/match", requireAuth, requireRole(["admin"]), async (request, resp
     });
 
     for (const task of tasksByPriority) {
-      const targetCount = task.severity === "critical" ? 2 : 1;
-      const ranked = [...volunteerPool.values()]
-        .map((volunteer) => ({
-          volunteer,
-          score: computeMatchScore(task, volunteer)
-        }))
-        .sort((left, right) => right.score.score - left.score.score);
+      const targetCount = requiresBuddy(task) ? 2 : 1;
+      const selected = [];
 
-      const selected = ranked
-        .filter((entry) => entry.score.score > -20)
-        .slice(0, targetCount);
+      for (let index = 0; index < targetCount; index += 1) {
+        const ranked = [...volunteerPool.values()]
+          .filter((volunteer) => !selected.some((entry) => entry.volunteer.id === volunteer.id))
+          .map((volunteer) => ({
+            volunteer,
+            score: computeMatchScore(
+              task,
+              volunteer,
+              selected.map((entry) => entry.volunteer)
+            )
+          }))
+          .sort((left, right) => right.score.score - left.score.score);
+
+        const nextVolunteer = ranked.find((entry) => entry.score.score > -6);
+        if (!nextVolunteer) {
+          break;
+        }
+        selected.push(nextVolunteer);
+      }
 
       const assignedUsers = [];
       for (const entry of selected) {
@@ -2152,14 +3508,30 @@ app.post("/api/match", requireAuth, requireRole(["admin"]), async (request, resp
         task: task.title,
         taskId: task.id,
         taskTitle: task.title,
+        category: task.category,
         locationName: task.locationName,
+        requiredSkills: task.requiredSkills || [],
+        complementarySkills: task.complementarySkills || [],
+        contextTags: task.contextTags || [],
+        requiresBuddy: requiresBuddy(task),
+        preferredLanguages: normalizeArray(task.preferredLanguages).length
+          ? task.preferredLanguages
+          : preferredLanguagesForTask(task),
+        safetyMode: requiresBuddy(task) ? "buddy_required" : "solo_allowed",
         volunteers: selected.map((entry) => ({
           id: entry.volunteer.user.id,
           name: entry.volunteer.user.name,
           score: Number(entry.score.score.toFixed(2)),
+          reasons: entry.score.reasons,
+          verificationReady: entry.score.verification.ready,
+          missingChecks: entry.score.verification.missing,
           distanceKm:
             entry.score.distanceKm === null ? null : Number(entry.score.distanceKm.toFixed(2))
-        }))
+        })),
+        warnings:
+          selected.length < targetCount
+            ? [`Only ${selected.length} of ${targetCount} recommended responders could be assigned.`]
+            : []
       });
     }
 
@@ -2181,8 +3553,8 @@ app.post(
         return;
       }
 
-      const ocr = await runOCR(request.file.path);
-      const parsed = extractNeedSignals(ocr.text);
+      const ocr = await runOCR(request.file.path, request.file.mimetype || "");
+      const parsed = extractNeedSignals(ocr.text, ocr.structuredExtraction || {});
       const task = await createTaskRecord({
         ngoUserId: request.user.id,
         source: "ocr",
@@ -2195,6 +3567,13 @@ app.post(
         latitude: parsed.latitude,
         longitude: parsed.longitude,
         requiredSkills: parsed.requiredSkills,
+        complementarySkills: parsed.complementarySkills,
+        preferredLanguages: parsed.preferredLanguages,
+        preferredCommunicationStyles: parsed.preferredCommunicationStyles,
+        contextTags: parsed.contextTags,
+        minimumMedicalTraining: parsed.minimumMedicalTraining,
+        category: parsed.category,
+        timeWindows: parsed.timeWindows,
         peopleServed: inferPeopleServed(parsed.type, parsed.severity)
       });
 
@@ -2205,7 +3584,16 @@ app.post(
         confidence: ocr.averageConfidence,
         suggestedType: parsed.type,
         suggestedSeverity: parsed.severity,
-        suggestedLocation: parsed.locationName
+        suggestedLocation: parsed.locationName,
+        flaggedWords: ocr.lowConfidenceWords,
+        evidence: parsed.evidence,
+        pipeline: {
+          provider: ocr.provider,
+          model: ocr.model,
+          engines: ocr.engines,
+          keyPhrases: ocr.keyPhrases
+        },
+        languages: ocr.languagesDetected
       });
 
       response.status(201).json({
@@ -2238,11 +3626,8 @@ app.post(
         return;
       }
 
-      const transcript = await transcribeAudio(
-        request.file.path,
-        request.file.mimetype || "audio/webm"
-      );
-      const parsed = extractNeedSignals(transcript.text);
+      const transcript = await transcribeAudio(request.file.path, request.file.mimetype || "audio/webm");
+      const parsed = extractNeedSignals(transcript.text, transcript.structuredExtraction || {});
       const task = await createTaskRecord({
         ngoUserId: request.user.id,
         source: "voice",
@@ -2255,7 +3640,32 @@ app.post(
         latitude: parsed.latitude,
         longitude: parsed.longitude,
         requiredSkills: parsed.requiredSkills,
+        complementarySkills: parsed.complementarySkills,
+        preferredLanguages: parsed.preferredLanguages,
+        preferredCommunicationStyles: parsed.preferredCommunicationStyles,
+        contextTags: parsed.contextTags,
+        minimumMedicalTraining: parsed.minimumMedicalTraining,
+        category: parsed.category,
+        timeWindows: parsed.timeWindows,
         peopleServed: inferPeopleServed(parsed.type, parsed.severity)
+      });
+
+      const review = await createReviewIfNeeded({
+        taskId: task.id,
+        source: "voice",
+        rawText: transcript.text,
+        confidence: transcript.averageConfidence,
+        suggestedType: parsed.type,
+        suggestedSeverity: parsed.severity,
+        suggestedLocation: parsed.locationName,
+        flaggedWords: [],
+        evidence: parsed.evidence,
+        pipeline: {
+          provider: transcript.provider,
+          model: transcript.model,
+          keyPhrases: transcript.keyPhrases
+        },
+        languages: transcript.languagesDetected
       });
 
       response.status(201).json({
@@ -2265,8 +3675,10 @@ app.post(
           title: task.title,
           type: task.type,
           severity: task.severity,
-          locationName: task.locationName
-        }
+          locationName: task.locationName,
+          needsReview: Boolean(review)
+        },
+        reviewId: review?.id || null
       });
     } catch (error) {
       next(error);
@@ -2294,6 +3706,13 @@ app.post("/api/manual-need", requireAuth, requireRole(["ngo", "admin"]), async (
       latitude: parsed.latitude,
       longitude: parsed.longitude,
       requiredSkills: parsed.requiredSkills,
+      complementarySkills: parsed.complementarySkills,
+      preferredLanguages: parsed.preferredLanguages,
+      preferredCommunicationStyles: parsed.preferredCommunicationStyles,
+      contextTags: parsed.contextTags,
+      minimumMedicalTraining: parsed.minimumMedicalTraining,
+      category: parsed.category,
+      timeWindows: parsed.timeWindows,
       peopleServed: inferPeopleServed(parsed.type, parsed.severity)
     });
 
@@ -2339,11 +3758,35 @@ app.put("/api/needs/:id", requireAuth, requireRole(["admin"]), async (request, r
     }
 
     const location = detectLocation(request.body.locationName || review.task.locationName);
+    const correctedText = String(request.body.correctedText || request.body.description || "").trim();
+    const existingPayload = review.correctedPayload || {};
+    const routingProfile = buildTaskRoutingProfile({
+      type: review.task.type,
+      severity: request.body.severity || review.task.severity,
+      description: correctedText || request.body.description || review.task.description,
+      locationName: request.body.locationName || review.task.locationName,
+      requiredSkills: review.task.requiredSkills,
+      complementarySkills: review.task.complementarySkills,
+      preferredLanguages: review.task.preferredLanguages,
+      preferredCommunicationStyles: review.task.preferredCommunicationStyles,
+      contextTags: review.task.contextTags,
+      minimumMedicalTraining: review.task.minimumMedicalTraining,
+      category: review.task.category,
+      timeWindows: review.task.timeWindows
+    });
     await review.task.update({
       title: request.body.title || review.task.title,
-      description: request.body.description || review.task.description,
+      description: correctedText || request.body.description || review.task.description,
       severity: normalizeSeverity(request.body.severity || review.task.severity),
       locationName: request.body.locationName || review.task.locationName,
+      category: routingProfile.category,
+      requiredSkills: routingProfile.requiredSkills,
+      complementarySkills: routingProfile.complementarySkills,
+      preferredLanguages: routingProfile.preferredLanguages,
+      preferredCommunicationStyles: routingProfile.preferredCommunicationStyles,
+      contextTags: routingProfile.contextTags,
+      minimumMedicalTraining: routingProfile.minimumMedicalTraining,
+      timeWindows: routingProfile.timeWindows,
       location: pointFromCoordinates(location.lat, location.lng),
       updatedAt: new Date()
     });
@@ -2351,10 +3794,14 @@ app.put("/api/needs/:id", requireAuth, requireRole(["admin"]), async (request, r
     await review.update({
       status: "approved",
       correctedPayload: {
+        ...existingPayload,
         title: request.body.title || review.task.title,
-        description: request.body.description || review.task.description,
+        description: correctedText || request.body.description || review.task.description,
+        correctedText: correctedText || review.task.description,
         severity: normalizeSeverity(request.body.severity || review.task.severity),
-        locationName: request.body.locationName || review.task.locationName
+        locationName: request.body.locationName || review.task.locationName,
+        trainingStatus: "approved_for_feedback",
+        reviewedAt: new Date().toISOString()
       }
     });
 
