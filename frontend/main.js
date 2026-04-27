@@ -184,10 +184,16 @@ function initFadeIn() {
       entries.forEach((entry) => {
         if (entry.isIntersecting) {
           entry.target.classList.add("visible");
+          observer.unobserve(entry.target);
         }
       });
     },
-    { threshold: 0.18 }
+    {
+      // Tall sections like the intelligence task lane may never hit a high
+      // intersection ratio on shorter screens, leaving a blank gap behind.
+      threshold: 0.01,
+      rootMargin: "0px 0px -6% 0px"
+    }
   );
 
   elements.forEach((element) => {

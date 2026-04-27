@@ -21,6 +21,8 @@ const PORT = Number(process.env.PORT || 3000);
 const JWT_SECRET = process.env.JWT_SECRET || "kindred-dev-secret";
 const DATABASE_URL =
   process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/kindredpune";
+const ROOT_DIR = path.join(__dirname, "..");
+const FRONTEND_DIR = path.join(ROOT_DIR, "frontend");
 const REPORTS_DIR = path.join(__dirname, "generated-reports");
 const UPLOAD_DIR = path.join(__dirname, "uploads");
 const TEMPLATE_PATH = path.join(__dirname, "templates", "csr-report.hbs");
@@ -2980,7 +2982,7 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use("/generated-reports", express.static(REPORTS_DIR));
-app.use(express.static(__dirname));
+app.use(express.static(FRONTEND_DIR));
 
 app.post("/api/signup", async (request, response, next) => {
   try {
