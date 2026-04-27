@@ -1,9 +1,8 @@
-require("dotenv").config();
-
-const express = require("express");
-const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
+const dotenv = require("dotenv");
+const express = require("express");
+const cors = require("cors");
 const fsPromises = require("fs/promises");
 const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
@@ -16,12 +15,29 @@ const twilio = require("twilio");
 const Tesseract = require("tesseract.js");
 const { Sequelize, DataTypes, Op } = require("sequelize");
 
+const ENV_FILE_CANDIDATES = [
+  path.join(__dirname, ".env"),
+  path.join(__dirname, "..", ".env")
+];
+
+const SHOULD_LOAD_LOCAL_ENV_FILES =
+  process.env.LOAD_DOTENV !== "false" &&
+  !process.env.K_SERVICE &&
+  !process.env.GOOGLE_CLOUD_PROJECT;
+
+if (SHOULD_LOAD_LOCAL_ENV_FILES) {
+  for (const envFilePath of ENV_FILE_CANDIDATES) {
+    if (fs.existsSync(envFilePath)) {
+      dotenv.config({ path: envFilePath, override: false });
+    }
+  }
+}
+
 const app = express();
 // Use the port provided by Google, otherwise default to 8080
 const port = Number(process.env.PORT || 8080);
 const JWT_SECRET = process.env.JWT_SECRET || "kindred-dev-secret";
-const DATABASE_URL =
-  process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/kindredpune";
+const DEFAULT_DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:5432/kindredpune";
 const DB_LOCATION_MODE = String(process.env.DB_LOCATION_MODE || "postgis").trim().toLowerCase();
 const USE_POSTGIS = DB_LOCATION_MODE !== "jsonb";
 const ROOT_DIR = path.join(__dirname, "..");
@@ -40,6 +56,210 @@ const SILENT_NEED_LOOKBACK_DAYS = Number(process.env.SILENT_NEED_LOOKBACK_DAYS |
 const GEMINI_MULTIMODAL_MODEL = process.env.GEMINI_MULTIMODAL_MODEL || "gemini-2.5-flash";
 const GEMINI_AUDIO_MODEL = process.env.GEMINI_AUDIO_MODEL || "gemini-2.5-flash";
 const MAP_REFRESH_CENTER = { lat: 18.5204, lng: 73.8567 };
+const DB_CONNECTION_RETRY_ATTEMPTS = Number(process.env.DB_CONNECTION_RETRY_ATTEMPTS || 12);
+const DB_CONNECTION_RETRY_DELAY_MS = Number(process.env.DB_CONNECTION_RETRY_DELAY_MS || 2500);
+
+function isRunningInDocker() {
+  return fs.existsSync("/.dockerenv");
+}
+
+function isProductionRuntime() {
+  return (
+    process.env.NODE_ENV === "production" ||
+    Boolean(process.env.K_SERVICE) ||
+    Boolean(process.env.GOOGLE_CLOUD_PROJECT)
+  );
+}
+
+function readFirstEnvValue(...names) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return "";
+}
+
+function resolveDatabaseHost() {
+  const configuredHost = readFirstEnvValue("PGHOST", "POSTGRES_HOST");
+
+  if (configuredHost) {
+    return configuredHost;
+  }
+
+  const instanceConnectionName = readFirstEnvValue("INSTANCE_CONNECTION_NAME");
+  if (instanceConnectionName) {
+    return `/cloudsql/${instanceConnectionName}`;
+  }
+
+  if (isRunningInDocker()) {
+    return "postgres";
+  }
+
+  return "";
+}
+
+function buildDatabaseUrlFromParts() {
+  const host = resolveDatabaseHost();
+  const database = readFirstEnvValue("PGDATABASE", "POSTGRES_DB", "POSTGRES_DATABASE");
+  const username = readFirstEnvValue("PGUSER", "POSTGRES_USER");
+  const password = readFirstEnvValue("PGPASSWORD", "POSTGRES_PASSWORD");
+  const portValue = readFirstEnvValue("PGPORT", "POSTGRES_PORT");
+  const portNumber = Number(portValue || 5432);
+  const port = Number.isFinite(portNumber) && portNumber > 0 ? String(portNumber) : "5432";
+
+  if (!host || !database || !username) {
+    return null;
+  }
+
+  if (host.startsWith("/")) {
+    return {
+      connectionParts: {
+        database,
+        username,
+        password,
+        host,
+        port
+      },
+      displayUrl: `postgres://${encodeURIComponent(username)}:****@${host}/${database}`
+    };
+  }
+
+  const auth = `${encodeURIComponent(username)}:${encodeURIComponent(password)}`;
+  return {
+    connectionString: `postgres://${auth}@${host}:${port}/${database}`,
+    displayUrl: `postgres://${encodeURIComponent(username)}:****@${host}:${port}/${database}`
+  };
+}
+
+function resolveDatabaseConnection() {
+  const configuredUrl = readFirstEnvValue("DATABASE_URL");
+
+  if (configuredUrl) {
+    return normalizeDatabaseConnection({ connectionString: configuredUrl });
+  }
+
+  const databaseConfigFromParts = buildDatabaseUrlFromParts();
+  if (databaseConfigFromParts) {
+    return normalizeDatabaseConnection(databaseConfigFromParts);
+  }
+
+  if (isProductionRuntime()) {
+    throw new Error(
+      "Database configuration missing. Set DATABASE_URL or PGHOST/PGDATABASE/PGUSER/PGPASSWORD before starting the production server."
+    );
+  }
+
+  return normalizeDatabaseConnection({ connectionString: DEFAULT_DATABASE_URL });
+}
+
+function normalizeDatabaseConnection(connection) {
+  if (connection.connectionString) {
+    return normalizeDatabaseConnectionString(connection.connectionString, connection.displayUrl);
+  }
+
+  return {
+    ...connection,
+    host: connection.connectionParts?.host || "",
+    displayUrl:
+      connection.displayUrl ||
+      `postgres://${encodeURIComponent(connection.connectionParts?.username || "unknown")}:****@${
+        connection.connectionParts?.host || "unknown"
+      }/${connection.connectionParts?.database || "unknown"}`
+  };
+}
+
+function normalizeDatabaseConnectionString(rawUrl, displayOverride) {
+  const configuredUrl = rawUrl || DEFAULT_DATABASE_URL;
+
+  try {
+    const parsed = new URL(configuredUrl);
+    const hostLooksLocal = ["localhost", "127.0.0.1", "0.0.0.0"].includes(parsed.hostname);
+
+    if (isRunningInDocker() && hostLooksLocal) {
+      parsed.hostname = process.env.POSTGRES_HOST || "postgres";
+      return {
+        connectionString: parsed.toString(),
+        host: parsed.hostname,
+        displayUrl: displayOverride || redactDatabaseUrl(parsed.toString())
+      };
+    }
+  } catch (error) {
+    console.warn(`Unable to parse DATABASE_URL, using it as-is: ${error.message}`);
+  }
+
+  return {
+    connectionString: configuredUrl,
+    host: safeReadHostname(configuredUrl),
+    displayUrl: displayOverride || redactDatabaseUrl(configuredUrl)
+  };
+}
+
+function safeReadHostname(rawUrl) {
+  try {
+    return new URL(rawUrl).hostname;
+  } catch (error) {
+    return "";
+  }
+}
+
+function redactDatabaseUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    if (parsed.password) {
+      parsed.password = "****";
+    }
+    return parsed.toString();
+  } catch (error) {
+    return rawUrl;
+  }
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function buildPublicOrigin(request) {
+  const configuredPublicUrl = readFirstEnvValue("BACKEND_PUBLIC_URL", "REPORT_BASE_URL");
+  if (configuredPublicUrl) {
+    return configuredPublicUrl.replace(/\/+$/, "");
+  }
+
+  const forwardedProto = String(request.get("x-forwarded-proto") || "").trim();
+  const protocol = forwardedProto || request.protocol || "https";
+  const forwardedHost = String(request.get("x-forwarded-host") || "").trim();
+  const host = String(forwardedHost || request.get("host") || request.headers.host || request.hostname || "").trim();
+  return host ? `${protocol}://${host}` : "";
+}
+
+function shouldRetryDatabaseConnection(error) {
+  const code = error?.original?.code || error?.parent?.code || error?.code;
+  return code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "EHOSTUNREACH";
+}
+
+function shouldUseDatabaseSsl(databaseConnection) {
+  const configuredSsl = readFirstEnvValue("DB_SSL");
+  if (configuredSsl) {
+    return configuredSsl === "true";
+  }
+
+  const pgSslMode = readFirstEnvValue("PGSSLMODE");
+  if (pgSslMode) {
+    return pgSslMode === "require";
+  }
+
+  const host = databaseConnection.host || "";
+  const isUnixSocket = host.startsWith("/");
+  const isLocalHost = ["localhost", "127.0.0.1", "0.0.0.0", "postgres"].includes(host);
+
+  return isProductionRuntime() && host && !isUnixSocket && !isLocalHost;
+}
+
+const DATABASE_CONNECTION = resolveDatabaseConnection();
+const DISPLAY_DATABASE_URL = DATABASE_CONNECTION.displayUrl;
+const DATABASE_SSL_ENABLED = shouldUseDatabaseSsl(DATABASE_CONNECTION);
 
 const geminiClient = process.env.GEMINI_API_KEY
   ? new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY })
@@ -50,11 +270,18 @@ const twilioClient =
     ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
     : null;
 
-const sequelize = new Sequelize(DATABASE_URL, {
+const sequelizeOptions = {
   dialect: "postgres",
   logging: false,
-  dialectOptions: process.env.DB_SSL === "true" ? { ssl: { require: true, rejectUnauthorized: false } } : {}
-});
+  dialectOptions: DATABASE_SSL_ENABLED ? { ssl: { require: true, rejectUnauthorized: false } } : {}
+};
+
+const sequelize = DATABASE_CONNECTION.connectionString
+  ? new Sequelize(DATABASE_CONNECTION.connectionString, sequelizeOptions)
+  : new Sequelize({
+      ...DATABASE_CONNECTION.connectionParts,
+      ...sequelizeOptions
+    });
 const LOCATION_DATA_TYPE = USE_POSTGIS ? DataTypes.GEOGRAPHY("POINT", 4326) : DataTypes.JSONB;
 
 const ROLE_ALIASES = {
@@ -1603,7 +1830,22 @@ Review.belongsTo(Task, { foreignKey: "task_id", as: "task" });
 Task.hasMany(Review, { foreignKey: "task_id", as: "reviews" });
 
 async function ensureDatabase() {
-  await sequelize.authenticate();
+  for (let attempt = 1; attempt <= DB_CONNECTION_RETRY_ATTEMPTS; attempt += 1) {
+    try {
+      await sequelize.authenticate();
+      break;
+    } catch (error) {
+      if (!shouldRetryDatabaseConnection(error) || attempt === DB_CONNECTION_RETRY_ATTEMPTS) {
+        throw error;
+      }
+
+      console.warn(
+        `Database connection attempt ${attempt}/${DB_CONNECTION_RETRY_ATTEMPTS} failed for ${DISPLAY_DATABASE_URL}. Retrying in ${DB_CONNECTION_RETRY_DELAY_MS}ms.`
+      );
+      await delay(DB_CONNECTION_RETRY_DELAY_MS);
+    }
+  }
+
   if (USE_POSTGIS) {
     await sequelize.query("CREATE EXTENSION IF NOT EXISTS postgis;");
   }
@@ -3896,7 +4138,13 @@ app.post(
         return;
       }
 
-      response.status(201).json(generated);
+      const publicOrigin = buildPublicOrigin(request);
+      response.status(201).json({
+        ...generated,
+        downloadUrl: publicOrigin
+          ? new URL(generated.downloadUrl, publicOrigin).toString()
+          : generated.downloadUrl
+      });
     } catch (error) {
       next(error);
     }
@@ -3916,15 +4164,19 @@ async function initializeApp() {
   await seedDatabase();
 }
 
-app.listen(port, "0.0.0.0", () => {
-  console.log(`Server is running on port ${port}`);
-});
-
-initializeApp().catch((error) => {
-  console.error("Background initialization failed:", error);
-  if (error?.name?.includes("SequelizeConnection")) {
-    console.error(
-      `Check that PostgreSQL with PostGIS is running and DATABASE_URL points to it. Current DATABASE_URL: ${DATABASE_URL}`
-    );
-  }
-});
+initializeApp()
+  .then(() => {
+    app.listen(port, "0.0.0.0", () => {
+      console.log(`Server is running on port ${port}`);
+      console.log(`Database connection ready: ${DISPLAY_DATABASE_URL}`);
+    });
+  })
+  .catch((error) => {
+    console.error("Application startup failed:", error);
+    if (error?.name?.includes("Sequelize")) {
+      console.error(
+        `Check that PostgreSQL with PostGIS is running and the service has DATABASE_URL or PGHOST/PGDATABASE/PGUSER/PGPASSWORD configured. Effective database target: ${DISPLAY_DATABASE_URL}`
+      );
+    }
+    process.exit(1);
+  });
