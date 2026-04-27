@@ -17,7 +17,8 @@ const Tesseract = require("tesseract.js");
 const { Sequelize, DataTypes, Op } = require("sequelize");
 
 const app = express();
-const PORT = Number(process.env.PORT || 3000);
+// Use the port provided by Google, otherwise default to 8080
+const port = Number(process.env.PORT || 8080);
 const JWT_SECRET = process.env.JWT_SECRET || "kindred-dev-secret";
 const DATABASE_URL =
   process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/kindredpune";
@@ -3902,21 +3903,21 @@ app.use((error, request, response, next) => {
   });
 });
 
-async function start() {
+async function initializeApp() {
   await ensureDirectories();
   await ensureDatabase();
   await seedDatabase();
-  app.listen(PORT, () => {
-    console.log(`KindredPune server running on http://localhost:${PORT}`);
-  });
 }
 
-start().catch((error) => {
-  console.error("Failed to start server:", error);
+app.listen(port, "0.0.0.0", () => {
+  console.log(`Server is running on port ${port}`);
+});
+
+initializeApp().catch((error) => {
+  console.error("Background initialization failed:", error);
   if (error?.name?.includes("SequelizeConnection")) {
     console.error(
       `Check that PostgreSQL with PostGIS is running and DATABASE_URL points to it. Current DATABASE_URL: ${DATABASE_URL}`
     );
   }
-  process.exit(1);
 });
