@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KindredPune | Admin Dashboard</title>
+    <meta
+      name="description"
+      content="Role landing page for NGO Admin users inside KindredPune."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-theme="intelligence" data-guard="auth" data-roles="ngo_admin">
+    <div class="page-shell">
+      <div class="ambient-shape one"></div>
+      <div class="ambient-shape two"></div>
+      <div class="ambient-shape three"></div>
+
+      <header class="site-header">
+        <a class="brand" href="./index.html">
+          <div class="brand-mark"></div>
+          <div class="brand-copy">
+            <strong>KindredPune</strong>
+            <span>Civic intelligence, made human</span>
+          </div>
+        </a>
+        <nav class="site-nav">
+          <a href="./index.html" data-nav="home">Home</a>
+          <a href="./intelligence.html" data-nav="intelligence">Intelligence</a>
+          <a href="./community.html" data-nav="community">Community</a>
+          <a href="./impact.html" data-nav="impact">Impact</a>
+          <a href="./join.html" data-nav="join">Join</a>
+          <a href="./admin-dashboard.html" class="is-active" data-nav="admin_dashboard" data-role-tab="ngo_admin" hidden>Admin Dashboard</a>
+          <a href="./field-desk.html" data-nav="field_desk" data-role-tab="ngo_worker" hidden>Field Desk</a>
+          <a href="./my-tasks.html" data-nav="my_tasks" data-role-tab="volunteer" hidden>My Tasks</a>
+          <a href="./csr-dashboard.html" data-nav="csr_dashboard" data-role-tab="csr" hidden>CSR Dashboard</a>
+        </nav>
+        <div class="header-actions">
+          <span class="pill-tag">Admin dashboard</span>
+          <a class="soft-button ghost-button" href="./admin.html">Open review queue</a>
+        </div>
+      </header>
+
+      <main>
+        <section class="page-hero fade-in">
+          <div class="page-hero-panel">
+            <div class="page-hero-grid slim">
+              <div class="page-hero-copy">
+                <span class="eyebrow">NGO Admin</span>
+                <h1>System oversight with one calmer front door.</h1>
+                <p>
+                  Use this role view as the starting point for review, escalations,
+                  and volunteer coordination before dropping into the full admin tools.
+                </p>
+                <div class="hero-actions">
+                  <a class="cta-button" href="./admin.html">Open full admin controls</a>
+                  <a class="ghost-button" href="./intelligence.html">Open intelligence board</a>
+                </div>
+              </div>
+              <div class="page-hero-visual">
+                <article class="visual-card blue">
+                  <span class="side-kicker">Admin lane</span>
+                  <ul class="timeline-list">
+                    <li><span>Review queue</span><strong>Approve flagged need records</strong></li>
+                    <li><span>Escalations</span><strong>Track cross-ward pressure</strong></li>
+                    <li><span>Matching</span><strong>Run volunteer pairing refreshes</strong></li>
+                  </ul>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in">
+          <div class="sheet sand">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">What this tab is for</span>
+                <h2>Quick access without nav clutter</h2>
+              </div>
+              <p>
+                The top navigation stays compact, while this role tab gives NGO admins
+                a direct way into the controls they use most.
+              </p>
+            </div>
+
+            <div class="detail-grid">
+              <article class="detail-card coral">
+                <div class="callout-number">01</div>
+                <h3>Review pipeline</h3>
+                <p class="muted">
+                  Open the full review queue to clean OCR, approve edits, and keep
+                  sensitive records moving forward.
+                </p>
+              </article>
+              <article class="detail-card blue">
+                <div class="callout-number">02</div>
+                <h3>Matching control</h3>
+                <p class="muted">
+                  Refresh volunteer pairings and inspect complementary skills before
+                  assignment pressure builds up.
+                </p>
+              </article>
+              <article class="detail-card teal">
+                <div class="callout-number">03</div>
+                <h3>City intelligence</h3>
+                <p class="muted">
+                  Jump back to the intelligence board anytime to see where operational
+                  pressure is increasing.
+                </p>
+              </article>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>KindredPune admin role view</span>
+        <span>Fast access to review, matching, and system controls</span>
+      </footer>
+    </div>
+
+    <script src="./main.js"></script>
+  </body>
+</html>

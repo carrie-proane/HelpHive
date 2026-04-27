@@ -22,7 +22,7 @@
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body data-theme="intelligence" data-guard="auth" data-roles="volunteer,ngo,admin,corporate">
+  <body data-theme="intelligence" data-guard="auth" data-roles="volunteer,ngo_worker,ngo_admin">
     <div class="page-shell">
       <div class="ambient-shape one"></div>
       <div class="ambient-shape two"></div>
@@ -37,11 +37,15 @@
           </div>
         </a>
         <nav class="site-nav">
-          <a href="./index.html">Home</a>
-          <a href="./intelligence.html" class="is-active">Intelligence</a>
-          <a href="./community.html">Community</a>
-          <a href="./impact.html">Impact</a>
-          <a href="./join.html">Join</a>
+          <a href="./index.html" data-nav="home">Home</a>
+          <a href="./intelligence.html" class="is-active" data-nav="intelligence">Intelligence</a>
+          <a href="./community.html" data-nav="community">Community</a>
+          <a href="./impact.html" data-nav="impact">Impact</a>
+          <a href="./join.html" data-nav="join">Join</a>
+          <a href="./admin-dashboard.html" data-nav="admin_dashboard" data-role-tab="ngo_admin" hidden>Admin Dashboard</a>
+          <a href="./field-desk.html" data-nav="field_desk" data-role-tab="ngo_worker" hidden>Field Desk</a>
+          <a href="./my-tasks.html" data-nav="my_tasks" data-role-tab="volunteer" hidden>My Tasks</a>
+          <a href="./csr-dashboard.html" data-nav="csr_dashboard" data-role-tab="csr" hidden>CSR Dashboard</a>
         </nav>
         <div class="header-actions">
           <span class="pill-tag">Live desk mode</span>
@@ -124,8 +128,35 @@
 
             <div class="map-layout">
               <div class="map-board">
-                <div class="filter-panel">
-                  <h3>Signal filters</h3>
+                <div class="map-toolbar">
+                  <button
+                    id="signalFilterToggle"
+                    class="soft-button map-filter-toggle"
+                    type="button"
+                    aria-expanded="false"
+                    aria-controls="signalFilterPanel"
+                    aria-label="Open signal filters"
+                  >
+                    <span class="map-filter-toggle-copy">
+                      <span class="map-filter-toggle-label">Signal filters</span>
+                      <span class="map-filter-toggle-hint">Tap to expand controls</span>
+                    </span>
+                    <span class="map-filter-toggle-icon" aria-hidden="true">+</span>
+                  </button>
+                </div>
+
+                <div id="signalFilterPanel" class="filter-panel is-collapsed">
+                  <div class="filter-panel-header">
+                    <h3>Signal filters</h3>
+                    <button
+                      class="filter-panel-close"
+                      type="button"
+                      aria-label="Close signal filters"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <p class="helper-copy">Refine the live map by need type, severity, or NGO desk.</p>
                   <div class="filter-grid">
                     <label>
                       Need type
@@ -204,15 +235,10 @@
               </p>
             </div>
 
-            <div class="split-panel">
-              <div class="task-stack" id="intelTaskList">
+            <div class="task-feed-shell">
+              <div class="task-stack task-feed" id="intelTaskList">
                 <div class="empty-state">
                   <p>Loading live tasks...</p>
-                </div>
-              </div>
-              <div class="task-stack" id="intelAlertList">
-                <div class="empty-state">
-                  <p>Loading silent-need alerts...</p>
                 </div>
               </div>
             </div>
@@ -355,6 +381,27 @@
         <span>KindredPune intelligence view</span>
         <span>Shared map, drilldowns, and routing for Pune wards</span>
       </footer>
+    </div>
+
+    <div
+      id="taskDetailModal"
+      class="task-detail-modal hidden"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="taskDetailTitle"
+    >
+      <div class="task-detail-backdrop" data-close-task-modal></div>
+      <article class="task-detail-panel">
+        <button
+          class="task-detail-close"
+          type="button"
+          aria-label="Close task details"
+          data-close-task-modal
+        >
+          ×
+        </button>
+        <div id="taskDetailContent"></div>
+      </article>
     </div>
 
     <script

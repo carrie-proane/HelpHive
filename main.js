@@ -5,17 +5,63 @@ const fallbackSeverityColors = {
 };
 
 const roleLabels = {
+  ngo_admin: "NGO Admin",
+  ngo_worker: "NGO Worker",
   volunteer: "Volunteer",
-  ngo: "NGO Worker",
-  admin: "Admin",
-  corporate: "Corporate"
+  csr: "CSR"
 };
 
 const roleHomes = {
-  volunteer: "./intelligence.html",
-  ngo: "./report.html",
-  admin: "./admin.html",
-  corporate: "./impact.html"
+  ngo_admin: "./admin-dashboard.html",
+  ngo_worker: "./field-desk.html",
+  volunteer: "./my-tasks.html",
+  csr: "./csr-dashboard.html"
+};
+
+const visibleTabsByRole = {
+  ngo_admin: ["home", "intelligence", "admin_dashboard"],
+  ngo_worker: ["home", "intelligence", "field_desk"],
+  volunteer: ["home", "intelligence", "my_tasks"],
+  csr: ["home", "csr_dashboard"]
+};
+
+const roleNavigationTabs = {
+  ngo_admin: {
+    key: "admin_dashboard",
+    label: "Admin Dashboard",
+    href: "./admin-dashboard.html"
+  },
+  ngo_worker: {
+    key: "field_desk",
+    label: "Field Desk",
+    href: "./field-desk.html"
+  },
+  volunteer: {
+    key: "my_tasks",
+    label: "My Tasks",
+    href: "./my-tasks.html"
+  },
+  csr: {
+    key: "csr_dashboard",
+    label: "CSR Dashboard",
+    href: "./csr-dashboard.html"
+  }
+};
+
+const pageNavKeys = {
+  "": "home",
+  "/": "home",
+  "/index.html": "home",
+  "/intelligence.html": "intelligence",
+  "/community.html": "community",
+  "/impact.html": "impact",
+  "/join.html": "join",
+  "/admin-dashboard.html": "admin_dashboard",
+  "/field-desk.html": "field_desk",
+  "/my-tasks.html": "my_tasks",
+  "/csr-dashboard.html": "csr_dashboard",
+  "/admin.html": "admin_dashboard",
+  "/report.html": "field_desk"
 };
 
 
@@ -54,6 +100,153 @@ function prettyLabel(value = "") {
     .join(" ");
 }
 
+function normalizeRole(role) {
+  const normalized = String(role || "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/-/g, "_");
+
+  if (["admin", "ngo_admin"].includes(normalized)) {
+    return "ngo_admin";
+  }
+
+  if (["ngo", "ngo_worker"].includes(normalized)) {
+    return "ngo_worker";
+  }
+
+  if (["corporate", "csr", "csr_partner"].includes(normalized)) {
+    return "csr";
+  }
+
+  return normalized;
+}
+
+function getRoleKey(currentUser) {
+  return normalizeRole(currentUser?.role);
+}
+
+function getNavKeyForPath(pathname = "/") {
+  try {
+    const resolved = new URL(String(pathname || "/"), window.location.origin).pathname;
+    const normalizedPath = resolved.endsWith("/") && resolved !== "/" ? resolved.slice(0, -1) : resolved;
+    return pageNavKeys[normalizedPath] || "";
+  } catch (error) {
+    const fallback = String(pathname || "/");
+    return pageNavKeys[fallback] || "";
+  }
+}
+
+function getCurrentPageNavKey() {
+  return getNavKeyForPath(window.location.pathname || "/");
+}
+
+function getAllowedTarget(target, currentUser) {
+  const roleKey = getRoleKey(currentUser);
+  const visibleTabs = visibleTabsByRole[roleKey];
+  const navKey = getNavKeyForPath(target);
+
+  if (target && (!visibleTabs || visibleTabs.includes(navKey) || !navKey)) {
+    return target;
+  }
+
+  return roleHomes[roleKey] || "./intelligence.html";
+}
+
+function applyRoleBasedNavigation(role) {
+  const normalizedRole = normalizeRole(role);
+  const visibleTabs = visibleTabsByRole[normalizedRole];
+
+  document.querySelectorAll("[data-nav]").forEach((link) => {
+    if (!(link instanceof HTMLElement)) {
+      return;
+    }
+
+    const navKey = link.dataset.nav;
+    const ownerRole = normalizeRole(link.dataset.roleTab || "");
+
+    if (!visibleTabs) {
+      link.hidden = Boolean(ownerRole);
+      return;
+    }
+
+    if (ownerRole && ownerRole !== normalizedRole) {
+      link.hidden = true;
+      return;
+    }
+
+    link.hidden = !visibleTabs.includes(navKey);
+  });
+}
+
+function escapeHtml(value = "") {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function withFallback(value, fallback = "Not specified") {
+  if (Array.isArray(value)) {
+    return value.length ? value : fallback;
+  }
+
+  if (value === undefined || value === null) {
+    return fallback;
+  }
+
+  const normalized = typeof value === "string" ? value.trim() : value;
+  return normalized === "" ? fallback : normalized;
+}
+
+function formatDateTime(value) {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    return "Not specified";
+  }
+
+  return new Intl.DateTimeFormat("en-IN", {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(timestamp);
+}
+
+function formatRelativeAge(value) {
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    return "Not specified";
+  }
+
+  const hours = formatAgeHours(value);
+  if (hours < 1) {
+    return "Less than 1 hour ago";
+  }
+
+  if (hours < 24) {
+    return `${Math.round(hours)}h ago`;
+  }
+
+  const days = Math.round(hours / 24);
+  return `${days}d ago`;
+}
+
+function joinReadableList(values = [], fallback = "Not specified") {
+  const list = (values || []).map((value) => String(value || "").trim()).filter(Boolean);
+  return list.length ? list.join(", ") : fallback;
+}
+
+function joinPrettyList(values = [], fallback = "Not specified") {
+  const list = (values || []).map((value) => prettyLabel(value)).filter(Boolean);
+  return list.length ? list.join(", ") : fallback;
+}
+
+function joinNameList(users = [], fallback = "Not assigned") {
+  const names = (users || []).map((user) => user?.name).filter(Boolean);
+  return names.length ? names.join(", ") : fallback;
+}
+
 function buildQueryString(values = {}) {
   const params = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => {
@@ -81,11 +274,26 @@ function getToken() {
 function setSession(token, user) {
   localStorage.setItem("kindredToken", token);
   localStorage.setItem("kindredUser", JSON.stringify(user));
+  localStorage.setItem("userRole", normalizeRole(user?.role));
 }
 
 function clearSession() {
   localStorage.removeItem("kindredToken");
   localStorage.removeItem("kindredUser");
+  localStorage.removeItem("userRole");
+}
+
+function getStoredUser() {
+  const raw = localStorage.getItem("kindredUser");
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    return null;
+  }
 }
 
 function setFlash(message, tone = "info") {
@@ -234,6 +442,7 @@ async function resolveCurrentUser() {
   try {
     const data = await apiFetch("/api/me");
     localStorage.setItem("kindredUser", JSON.stringify(data.user));
+    localStorage.setItem("userRole", normalizeRole(data.user?.role));
     return data.user;
   } catch (error) {
     clearSession();
@@ -243,7 +452,7 @@ async function resolveCurrentUser() {
 
 function renderHeaderActions(currentUser) {
   const headerActions = document.querySelectorAll(".header-actions");
-  const navs = document.querySelectorAll(".site-nav");
+  const roleKey = getRoleKey(currentUser);
 
   headerActions.forEach((slot) => {
     if (!slot.dataset.baseLabel) {
@@ -267,46 +476,18 @@ function renderHeaderActions(currentUser) {
     slot.innerHTML = `
       ${pill}
       <div class="header-link-row">
-        <a class="ghost-button" href="${roleHomes[currentUser.role] || "./intelligence.html"}">Dashboard</a>
+        <a class="ghost-button" href="${roleHomes[roleKey] || "./intelligence.html"}">Dashboard</a>
         <a class="ghost-button" href="./profile.html">Profile</a>
         <div class="user-badge">
           <strong>${currentUser.name}</strong>
-          <span>${roleLabels[currentUser.role] || currentUser.role}</span>
+          <span>${roleLabels[roleKey] || prettyLabel(currentUser.role)}</span>
         </div>
         <button class="soft-button" type="button" data-logout>Logout</button>
       </div>
     `;
   });
 
-  navs.forEach((nav) => {
-    nav.querySelectorAll("[data-role-nav]").forEach((node) => node.remove());
-
-    if (!currentUser) {
-      return;
-    }
-
-    const label =
-      currentUser.role === "admin"
-        ? "Admin"
-        : currentUser.role === "ngo"
-          ? "Report Needs"
-          : currentUser.role === "corporate"
-            ? "CSR Dashboard"
-            : "My Tasks";
-    const href =
-      currentUser.role === "admin"
-        ? "./admin.html"
-        : currentUser.role === "ngo"
-          ? "./report.html"
-          : currentUser.role === "corporate"
-            ? "./impact.html"
-            : "./intelligence.html";
-    const link = document.createElement("a");
-    link.href = href;
-    link.textContent = label;
-    link.dataset.roleNav = "true";
-    nav.appendChild(link);
-  });
+  applyRoleBasedNavigation(roleKey);
 
   document.querySelectorAll("[data-logout]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -318,6 +499,16 @@ function renderHeaderActions(currentUser) {
 }
 
 function enforcePageGuard(currentUser) {
+  const roleKey = getRoleKey(currentUser);
+  const currentPageNavKey = getCurrentPageNavKey();
+  const visibleTabs = visibleTabsByRole[roleKey];
+
+  if (currentUser && visibleTabs && currentPageNavKey && !visibleTabs.includes(currentPageNavKey)) {
+    setFlash("That page is not available for your current role.", "info");
+    window.location.href = roleHomes[roleKey] || "./intelligence.html";
+    return false;
+  }
+
   const guard = document.body.dataset.guard;
   if (!guard) {
     return true;
@@ -332,12 +523,12 @@ function enforcePageGuard(currentUser) {
 
   const roles = (document.body.dataset.roles || "")
     .split(",")
-    .map((value) => value.trim())
+    .map((value) => normalizeRole(value))
     .filter(Boolean);
 
-  if (roles.length && !roles.includes(currentUser.role)) {
+  if (roles.length && !roles.includes(roleKey)) {
     setFlash("Your account does not have access to that page.", "error");
-    window.location.href = roleHomes[currentUser.role] || "./index.html";
+    window.location.href = roleHomes[roleKey] || "./intelligence.html";
     return false;
   }
 
@@ -351,98 +542,299 @@ function attachFlash() {
   }
 }
 
-function taskActionButtons(task, currentUser) {
+function taskActionButtons(task, currentUser, options = {}) {
+  const { className = "inline-actions", mode = "all" } = options;
   if (!currentUser) {
-    return `<a class="ghost-button" href="./login.html">Log in to help</a>`;
+    return `<div class="${className}"><a class="ghost-button" href="./login.html">Log in to help</a></div>`;
   }
 
+  const roleKey = getRoleKey(currentUser);
   const isAssigned = task.assignedUsers?.some((user) => user.id === currentUser.id);
-  const canVolunteer = currentUser.role === "volunteer" || currentUser.role === "admin";
+  const canVolunteer = roleKey === "volunteer" || roleKey === "ngo_admin";
   const canComplete =
-    currentUser.role === "admin" ||
-    currentUser.role === "ngo" ||
+    roleKey === "ngo_admin" ||
+    roleKey === "ngo_worker" ||
     isAssigned;
 
   const actions = [];
 
   if (canVolunteer && !isAssigned && task.status !== "completed") {
     actions.push(
-      `<button class="cta-button" type="button" data-task-action="volunteer" data-task-id="${task.id}">Volunteer</button>`
+      `<button class="cta-button" type="button" data-task-action="volunteer" data-task-id="${escapeHtml(task.id)}">Volunteer</button>`
     );
   }
 
   if (canComplete && task.status !== "completed") {
     actions.push(
-      `<button class="ghost-button" type="button" data-task-action="complete" data-task-id="${task.id}">Mark complete</button>`
+      `<button class="ghost-button" type="button" data-task-action="complete" data-task-id="${escapeHtml(task.id)}">Mark complete</button>`
     );
   }
 
-  if (!actions.length) {
-    actions.push(`<span class="pill-tag">No action needed</span>`);
+  const visibleActions = mode === "primary" ? actions.slice(0, 1) : actions;
+
+  if (!visibleActions.length) {
+    visibleActions.push(`<span class="pill-tag">No action needed</span>`);
   }
 
-  return `<div class="inline-actions">${actions.join("")}</div>`;
+  return `<div class="${className}">${visibleActions.join("")}</div>`;
+}
+
+const taskSeverityOrder = {
+  urgent: 0,
+  critical: 1,
+  stable: 2
+};
+
+const taskSeverityConfig = [
+  { key: "urgent", label: "Urgent" },
+  { key: "critical", label: "Critical" },
+  { key: "stable", label: "Stable" }
+];
+
+function renderSeverityIcon(severity = "stable") {
+  if (severity === "urgent") {
+    return `
+      <span class="severity-icon" aria-hidden="true">
+        <svg viewBox="0 0 16 16" fill="none">
+          <path d="M3.5 8.5C4.6 6 6 4.8 8 4.8C10 4.8 11.4 6 12.5 8.5" />
+          <path d="M8 2.8V5.1" />
+          <path d="M5.2 9.8L8 7.2L10.8 9.8" />
+          <path d="M8 7.2V13.2" />
+        </svg>
+      </span>
+    `;
+  }
+
+  if (severity === "critical") {
+    return `
+      <span class="severity-icon" aria-hidden="true">
+        <svg viewBox="0 0 16 16" fill="none">
+          <path d="M8 2.4L13.2 12.8H2.8L8 2.4Z" />
+          <path d="M8 6.1V9.2" />
+          <path d="M8 11.4H8.01" />
+        </svg>
+      </span>
+    `;
+  }
+
+  return `
+    <span class="severity-icon" aria-hidden="true">
+      <svg viewBox="0 0 16 16" fill="none">
+        <path d="M3.2 8H12.8" />
+        <path d="M5.3 5.6C6.1 6.7 7 7.3 8 7.3C9 7.3 9.9 6.7 10.7 5.6" />
+        <path d="M5.3 10.4C6.1 9.3 7 8.7 8 8.7C9 8.7 9.9 9.3 10.7 10.4" />
+      </svg>
+    </span>
+  `;
+}
+
+function renderTaskDetailItem(label, value, options = {}) {
+  const { wide = false } = options;
+  return `
+    <div class="task-detail-item ${wide ? "is-wide" : ""}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
+function renderTaskDetailModal(task, currentUser) {
+  const roleKey = getRoleKey(currentUser);
+  const assignedNames = joinNameList(task.assignedUsers, "Not assigned");
+  const buddyNames = joinNameList(task.buddySuggestions, "Not assigned");
+  const fieldStyle = joinPrettyList(task.preferredCommunicationStyles, "Not specified");
+  const volunteerLogic =
+    roleKey === "volunteer" && task.currentUserMatch?.reasons?.length
+      ? task.currentUserMatch.reasons.join(" · ")
+      : task.buddyReasons?.length
+        ? task.buddyReasons.join(" · ")
+        : "Matching uses skill fit, language, medical readiness, team complement, and geography.";
+  const coordinates =
+    typeof task.latitude === "number" && typeof task.longitude === "number"
+      ? `${task.latitude.toFixed(4)}, ${task.longitude.toFixed(4)}`
+      : "Not specified";
+  const createdLine = task.createdAt
+    ? `${formatDateTime(task.createdAt)} · ${formatRelativeAge(task.createdAt)}`
+    : "Not specified";
+  const dueLine = formatDateTime(task.dueDate);
+  const notes = withFallback(task.notes, "No notes added");
+
+  return `
+    <div class="task-detail-header">
+      <div class="task-card-header">
+        <span class="severity-badge ${escapeHtml(task.severity || "stable")}">${escapeHtml(capitalize(task.severity || "stable"))}</span>
+        <span class="pill-tag">${escapeHtml(prettyLabel(task.status || "open"))}</span>
+      </div>
+      <h2 id="taskDetailTitle">${escapeHtml(withFallback(task.title, "Untitled task"))}</h2>
+      <p class="task-card-summary">${escapeHtml(notes)}</p>
+    </div>
+
+    <div class="task-detail-grid">
+      ${renderTaskDetailItem("Severity", capitalize(withFallback(task.severity, "stable")))}
+      ${renderTaskDetailItem("Status", prettyLabel(withFallback(task.status, "open")))}
+      ${renderTaskDetailItem("Assigned person", assignedNames)}
+      ${renderTaskDetailItem("Assigned NGO / team", withFallback(task.ngo, "Not assigned"))}
+      ${renderTaskDetailItem("Area / ward / location", withFallback(task.locationName, "Not specified"))}
+      ${renderTaskDetailItem("Task type", prettyLabel(withFallback(task.type, "Not specified")))}
+      ${renderTaskDetailItem("Need category", prettyLabel(withFallback(task.category, "Not specified")))}
+      ${renderTaskDetailItem("Field style", fieldStyle)}
+      ${renderTaskDetailItem("Created / age", createdLine)}
+      ${renderTaskDetailItem("Due date", dueLine)}
+      ${renderTaskDetailItem("Skills required", joinPrettyList(task.requiredSkills, "Not specified"), { wide: true })}
+      ${renderTaskDetailItem("Language required", joinReadableList(task.preferredLanguages, "Not specified"), { wide: true })}
+      ${renderTaskDetailItem("Buddy suggestion", buddyNames, { wide: true })}
+      ${renderTaskDetailItem("Volunteer recommendation logic", volunteerLogic, { wide: true })}
+      ${renderTaskDetailItem("Coordinates / map reference", coordinates, { wide: true })}
+      ${renderTaskDetailItem("Notes / description", notes, { wide: true })}
+    </div>
+
+    <div class="task-card-actions task-detail-footer">
+      ${taskActionButtons(task, currentUser, {
+        className: "inline-actions task-detail-actions",
+        mode: "all"
+      })}
+    </div>
+  `;
 }
 
 function renderTaskCard(task, currentUser) {
-  const assignedNames = (task.assignedUsers || []).map((user) => user.name).join(", ");
-  const buddyNames = (task.buddySuggestions || []).map((user) => user.name).join(", ");
-  const safetyLine = task.requiresBuddy
-    ? `Buddy required · target team size ${task.recommendedTeamSize || 2}`
-    : "Solo-safe assignment allowed";
-  const languageLine = (task.preferredLanguages || []).length
-    ? `Preferred languages: ${(task.preferredLanguages || []).join(", ")}`
-    : "";
-  const complementaryLine = (task.complementarySkills || []).length
-    ? `Complementary skills: ${(task.complementarySkills || []).map(prettyLabel).join(", ")}`
-    : "";
-  const contextLine = (task.contextTags || []).length
-    ? `Context: ${(task.contextTags || []).slice(0, 3).map(prettyLabel).join(", ")}`
-    : "";
-  const communicationLine = (task.preferredCommunicationStyles || []).length
-    ? `Field style: ${(task.preferredCommunicationStyles || []).map(prettyLabel).join(", ")}`
-    : "";
-  const trainingLine =
-    task.minimumMedicalTraining && task.minimumMedicalTraining !== "none"
-      ? `Medical threshold: ${prettyLabel(task.minimumMedicalTraining)}`
-      : "";
-  const matchLine =
-    currentUser?.role === "volunteer" && task.currentUserMatch?.reasons?.length
-      ? `Why this fits you: ${task.currentUserMatch.reasons.slice(0, 3).join(" · ")}`
-      : "";
+  const severity = task.severity || "stable";
+  const assignedLabel = joinNameList(task.assignedUsers, withFallback(task.ngo, "Not assigned"));
+  const summary = withFallback(task.notes, "No notes added");
+  const severityLabel =
+    taskSeverityConfig.find((item) => item.key === severity)?.label || capitalize(severity);
 
   return `
-    <article class="task-card">
-      <span class="severity-badge ${task.severity}">${capitalize(task.severity)}</span>
-      <h3>${task.title}</h3>
-      <p class="muted">${task.notes || "Live task routed from the need intake lane."}</p>
-      <ul class="task-tags">
-        ${(task.requiredSkills || []).map((skill) => `<li>${prettyLabel(skill)}</li>`).join("")}
-      </ul>
-      <div class="task-meta-row">
-        <span>${task.locationName} · ${prettyLabel(task.category || task.type)}</span>
-        <strong>${task.distanceKm ? `${task.distanceKm} km away` : capitalize(task.status)}</strong>
+    <article
+      class="task-card compact ${escapeHtml(severity)}"
+    >
+      <div class="task-card-header">
+        <span class="severity-tag ${escapeHtml(severity)}">${renderSeverityIcon(severity)}<span>${escapeHtml(severityLabel)}</span></span>
+        <span class="task-card-kicker">${escapeHtml(prettyLabel(withFallback(task.status, "open")))}</span>
       </div>
-      ${
-        assignedNames
-          ? `<p class="helper-copy">Assigned: ${assignedNames}</p>`
-          : `<p class="helper-copy">No volunteers assigned yet.</p>`
-      }
-      <p class="helper-copy">${safetyLine}</p>
-      ${languageLine ? `<p class="helper-copy">${languageLine}</p>` : ""}
-      ${trainingLine ? `<p class="helper-copy">${trainingLine}</p>` : ""}
-      ${complementaryLine ? `<p class="helper-copy">${complementaryLine}</p>` : ""}
-      ${communicationLine ? `<p class="helper-copy">${communicationLine}</p>` : ""}
-      ${contextLine ? `<p class="helper-copy">${contextLine}</p>` : ""}
-      ${matchLine ? `<p class="helper-copy">${matchLine}</p>` : ""}
-      ${
-        buddyNames
-          ? `<p class="helper-copy">Buddy suggestion: ${buddyNames}</p>`
-          : ""
-      }
-      ${taskActionButtons(task, currentUser)}
+      <h3>${escapeHtml(withFallback(task.title, "Untitled task"))}</h3>
+      <p class="task-card-summary">${escapeHtml(summary)}</p>
+      <div class="task-card-meta-strip">
+        <span class="task-card-meta-pill">${escapeHtml(withFallback(task.locationName, "Not specified"))}</span>
+        <span class="task-card-meta-pill">${escapeHtml(assignedLabel)}</span>
+        <span class="task-card-meta-pill">${escapeHtml(prettyLabel(withFallback(task.category || task.type, "Not specified")))}</span>
+      </div>
+      <div class="task-card-actions">
+        ${taskActionButtons(task, currentUser, {
+          className: "inline-actions task-primary-actions",
+          mode: "primary"
+        })}
+        <button
+          class="ghost-button"
+          type="button"
+          data-task-detail="${escapeHtml(task.id)}"
+        >
+          View details
+        </button>
+      </div>
     </article>
   `;
+}
+
+function renderOrderedTaskList(tasks, currentUser) {
+  const orderedTasks = [...tasks]
+    .map((task, index) => ({ task, index }))
+    .sort((left, right) => {
+      const severityDelta =
+        (taskSeverityOrder[left.task.severity] ?? 99) - (taskSeverityOrder[right.task.severity] ?? 99);
+
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+
+      return left.index - right.index;
+    })
+    .map(({ task }) => task);
+
+  return orderedTasks.length
+    ? orderedTasks.map((task) => renderTaskCard(task, currentUser)).join("")
+    : renderEmptyState("No live tasks are open right now.");
+}
+
+function initSignalFilterPanel(mapElementId, map) {
+  if (mapElementId !== "intelligence-map") {
+    return;
+  }
+
+  const toggle = document.getElementById("signalFilterToggle");
+  const panel = document.getElementById("signalFilterPanel");
+  const closeButton = panel?.querySelector(".filter-panel-close");
+  const toggleLabel = toggle?.querySelector(".map-filter-toggle-label");
+  const toggleHint = toggle?.querySelector(".map-filter-toggle-hint");
+
+  if (!toggle || !panel || !closeButton || !toggleLabel || !toggleHint || toggle.dataset.bound === "true") {
+    return;
+  }
+
+  toggle.dataset.bound = "true";
+
+  function syncFilterToggle(isOpen) {
+    panel.classList.toggle("is-collapsed", !isOpen);
+    toggle.classList.toggle("is-open", isOpen);
+    toggle.setAttribute("aria-expanded", String(isOpen));
+    toggle.setAttribute("aria-label", isOpen ? "Hide signal filters" : "Open signal filters");
+    toggleLabel.textContent = isOpen ? "Hide filters" : "Signal filters";
+    toggleHint.textContent = isOpen ? "Collapse this panel" : "Tap to expand controls";
+
+    window.requestAnimationFrame(() => {
+      map.invalidateSize();
+    });
+  }
+
+  function openSignalFilters() {
+    syncFilterToggle(true);
+  }
+
+  function closeSignalFilters() {
+    syncFilterToggle(false);
+  }
+
+  function toggleSignalFilters() {
+    const isOpen = panel.classList.contains("is-collapsed");
+    if (isOpen) {
+      openSignalFilters();
+      return;
+    }
+
+    closeSignalFilters();
+  }
+
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleSignalFilters();
+  });
+
+  closeButton.addEventListener("click", (event) => {
+    event.stopPropagation();
+    closeSignalFilters();
+  });
+
+  panel.addEventListener("click", (event) => {
+    event.stopPropagation();
+  });
+
+  document.addEventListener("click", (event) => {
+    if (
+      !panel.classList.contains("is-collapsed") &&
+      !panel.contains(event.target) &&
+      !toggle.contains(event.target)
+    ) {
+      closeSignalFilters();
+    }
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !panel.classList.contains("is-collapsed")) {
+      closeSignalFilters();
+    }
+  });
+
+  syncFilterToggle(false);
 }
 
 async function setupMap(mapElementId, filterPrefix = "") {
@@ -571,12 +963,32 @@ async function setupMap(mapElementId, filterPrefix = "") {
     }
   });
 
+  initSignalFilterPanel(mapElementId, map);
   await refreshData();
+  window.requestAnimationFrame(() => {
+    map.invalidateSize();
+  });
   window.setInterval(refreshData, 60 * 1000);
-  return { refreshData };
+  return { refreshData, map };
 }
 
-async function initHomePage() {
+function syncHomePagePublicLinksVisibility(currentUser) {
+  const publicPageLinksSection = document.getElementById("publicPageLinksSection");
+  if (!publicPageLinksSection) {
+    return;
+  }
+
+  if (currentUser) {
+    publicPageLinksSection.classList.add("hidden");
+    return;
+  }
+
+  publicPageLinksSection.classList.remove("hidden");
+}
+
+async function initHomePage(currentUser) {
+  syncHomePagePublicLinksVisibility(currentUser);
+
   const overviewTargets = document.querySelectorAll("[data-overview-key]");
   if (!overviewTargets.length || !getToken()) {
     return;
@@ -596,53 +1008,88 @@ async function initHomePage() {
 }
 
 async function initIntelligencePage(currentUser) {
+  const roleKey = getRoleKey(currentUser);
   const taskList = document.getElementById("intelTaskList");
-  const alertList = document.getElementById("intelAlertList");
   const summaryList = document.getElementById("intelDeskSummary");
   const volunteerSummary = document.getElementById("intelVolunteerSummary");
   const taskContainer = document.getElementById("intelTaskSection");
+  const taskDetailModal = document.getElementById("taskDetailModal");
+  const taskDetailContent = document.getElementById("taskDetailContent");
+  const taskRegistry = new Map();
+  let activeTaskId = null;
+  let lastFocusedElement = null;
 
-  if (!taskList && !alertList && !summaryList) {
+  if (!taskList && !summaryList) {
     return;
+  }
+
+  function openTaskDetailModal(task, preserveFocus = false) {
+    if (!taskDetailModal || !taskDetailContent || !task) {
+      return;
+    }
+
+    activeTaskId = task.id;
+
+    if (!preserveFocus && document.activeElement instanceof HTMLElement) {
+      lastFocusedElement = document.activeElement;
+    }
+
+    taskDetailContent.innerHTML = renderTaskDetailModal(task, currentUser);
+    taskDetailModal.classList.remove("hidden");
+    document.body.classList.add("modal-open");
+
+    const closeButton = taskDetailModal.querySelector(".task-detail-close");
+    if (closeButton instanceof HTMLButtonElement) {
+      closeButton.focus();
+    }
+  }
+
+  function closeTaskDetailModal() {
+    if (!taskDetailModal || taskDetailModal.classList.contains("hidden")) {
+      return;
+    }
+
+    taskDetailModal.classList.add("hidden");
+    document.body.classList.remove("modal-open");
+    activeTaskId = null;
+
+    if (lastFocusedElement instanceof HTMLElement) {
+      lastFocusedElement.focus();
+    }
+  }
+
+  function syncTaskRegistry(tasks = []) {
+    taskRegistry.clear();
+    tasks.forEach((task) => {
+      taskRegistry.set(task.id, task);
+    });
+
+    if (!activeTaskId || !taskDetailModal || taskDetailModal.classList.contains("hidden")) {
+      return;
+    }
+
+    const nextTask = taskRegistry.get(activeTaskId);
+    if (!nextTask) {
+      closeTaskDetailModal();
+      return;
+    }
+
+    openTaskDetailModal(nextTask, true);
   }
 
   async function refreshTasks() {
     try {
-      const [taskData, alertData, overview] = await Promise.all([
+      const [taskData, overview] = await Promise.all([
         apiFetch("/api/tasks"),
-        apiFetch("/api/alerts"),
         apiFetch("/api/overview")
       ]);
 
       const tasks = taskData.tasks || [];
-      const alerts = alertData.alerts || [];
+
+      syncTaskRegistry(tasks);
 
       if (taskList) {
-        taskList.innerHTML = tasks.length
-          ? tasks.map((task) => renderTaskCard(task, currentUser)).join("")
-          : renderEmptyState("No live tasks are open right now.");
-      }
-
-      if (alertList) {
-        alertList.innerHTML = alerts.length
-          ? alerts
-              .map(
-                (alert) => `
-                  <article class="dashboard-shell coral">
-                    <span class="severity-badge ${alert.severity}">${capitalize(alert.severity)}</span>
-                    <h3>${alert.title}</h3>
-                    <p class="muted">${alert.explanation}</p>
-                    <p class="helper-copy">${alert.locationName} · ${alert.evidenceCount} linked reports</p>
-                    ${
-                      alert.evidence?.length
-                        ? `<p class="helper-copy">${alert.evidence[1] || alert.evidence[0]}</p>`
-                        : ""
-                    }
-                  </article>
-                `
-              )
-              .join("")
-          : renderEmptyState("No silent-need alerts are active.");
+        taskList.innerHTML = renderOrderedTaskList(tasks, currentUser);
       }
 
       if (summaryList) {
@@ -665,7 +1112,7 @@ async function initIntelligencePage(currentUser) {
                   <li>
                     <span>${task.title}</span>
                     <strong>${
-                      currentUser?.role === "volunteer"
+                      roleKey === "volunteer"
                         ? `${Math.round(task.currentUserMatch?.score || 0)} fit score`
                         : task.assignedUsers.map((user) => user.name).join(", ") || "Pending"
                     }</strong>
@@ -676,7 +1123,7 @@ async function initIntelligencePage(currentUser) {
           : `<li><span>Matching lane</span><strong>Waiting for the next run</strong></li>`;
       }
 
-      if (taskContainer && currentUser?.role === "volunteer") {
+      if (taskContainer && roleKey === "volunteer") {
         const heading = taskContainer.querySelector("[data-role-copy]");
         if (heading) {
           heading.textContent = `${currentUser.name}, these are the live tasks that fit the shared response lane right now.`;
@@ -688,6 +1135,16 @@ async function initIntelligencePage(currentUser) {
   }
 
   document.addEventListener("click", async (event) => {
+    const detailTrigger = event.target.closest("[data-task-detail]");
+    if (detailTrigger) {
+      const taskId = detailTrigger.dataset.taskDetail;
+      const task = taskRegistry.get(taskId);
+      if (task) {
+        openTaskDetailModal(task);
+      }
+      return;
+    }
+
     const action = event.target.closest("[data-task-action]");
     if (!action) {
       return;
@@ -721,10 +1178,25 @@ async function initIntelligencePage(currentUser) {
     }
   });
 
+  if (taskDetailModal) {
+    taskDetailModal.addEventListener("click", (event) => {
+      if (event.target.closest("[data-close-task-modal]")) {
+        closeTaskDetailModal();
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !taskDetailModal.classList.contains("hidden")) {
+        closeTaskDetailModal();
+      }
+    });
+  }
+
   await refreshTasks();
 }
 
 async function initImpactPage(currentUser) {
+  const roleKey = getRoleKey(currentUser);
   const metricCards = document.getElementById("csrMetricCards");
   const narrative = document.getElementById("csrNarrative");
   const chartPanel = document.getElementById("csrImpactChart");
@@ -741,7 +1213,7 @@ async function initImpactPage(currentUser) {
     return;
   }
 
-  if (!currentUser || !["corporate", "admin"].includes(currentUser.role)) {
+  if (!currentUser || !["csr", "ngo_admin"].includes(roleKey)) {
     if (authPrompt) {
       authPrompt.classList.remove("hidden");
     }
@@ -792,7 +1264,7 @@ async function initImpactPage(currentUser) {
   }
 
   function hydrateCompanyFieldFromSession() {
-    if (!companyField || currentUser.role !== "corporate") {
+    if (!companyField || roleKey !== "csr") {
       return;
     }
 
@@ -899,7 +1371,7 @@ async function initImpactPage(currentUser) {
 
   async function loadReport() {
     const selectedCompanyId = companyField?.value || currentUser.companyId || "";
-    if (!selectedCompanyId && currentUser.role === "admin") {
+    if (!selectedCompanyId && roleKey === "ngo_admin") {
       throw new Error("Choose a company to load the CSR dashboard.");
     }
 
@@ -909,7 +1381,7 @@ async function initImpactPage(currentUser) {
     };
     const queryString = buildQueryString(filters);
     const report =
-      selectedCompanyId && currentUser.role === "admin"
+      selectedCompanyId && roleKey === "ngo_admin"
         ? await apiFetch(`/api/companies/${selectedCompanyId}/csr-stats${queryString}`)
         : await apiFetch(`/api/csr-report${queryString}`);
     renderMetrics(report);
@@ -938,7 +1410,7 @@ async function initImpactPage(currentUser) {
   try {
     setLoadingState(true);
     hydrateCompanyFieldFromSession();
-    if (currentUser.role === "admin") {
+    if (roleKey === "ngo_admin") {
       await loadCompanies();
     } else {
       void loadCompanies().catch(() => {});
@@ -1391,7 +1863,7 @@ async function initProfilePage(currentUser) {
 
 function getRedirectTarget(currentUser) {
   const searchParams = new URLSearchParams(window.location.search);
-  return searchParams.get("redirect") || roleHomes[currentUser.role] || "./index.html";
+  return getAllowedTarget(searchParams.get("redirect"), currentUser);
 }
 
 async function initLoginPage(currentUser) {
@@ -1451,7 +1923,7 @@ async function initSignupPage(currentUser) {
       });
       setSession(result.token, result.user);
       setFlash("Your account is ready.", "success");
-      window.location.href = result.redirectTo || getRedirectTarget(result.user);
+      window.location.href = getAllowedTarget(result.redirectTo, result.user);
     } catch (error) {
       showGlobalBanner(error.message || "Could not create your account.", "error");
     }
@@ -1462,6 +1934,10 @@ async function bootstrap() {
   initFadeIn();
   attachFlash();
 
+  const cachedUser = getStoredUser();
+  renderHeaderActions(cachedUser);
+  syncHomePagePublicLinksVisibility(cachedUser);
+
   const currentUser = await resolveCurrentUser();
   renderHeaderActions(currentUser);
 
@@ -1470,7 +1946,7 @@ async function bootstrap() {
   }
 
   await Promise.all([setupMap("pune-map"), setupMap("intelligence-map", "intel-")]);
-  await initHomePage();
+  await initHomePage(currentUser);
   await initLoginPage(currentUser);
   await initSignupPage(currentUser);
   await initIntelligencePage(currentUser);
