@@ -64,6 +64,7 @@ const pageNavKeys = {
   "/report.html": "field_desk"
 };
 
+const API_URL = "https://backend-service-321419338933.us-central1.run.app";
 
 function hexToRgba(hex, alpha) {
   const value = hex.replace("#", "");
@@ -324,6 +325,8 @@ async function apiFetch(url, options = {}) {
   const token = getToken();
   const headers = new Headers(options.headers || {});
   const isFormData = options.body instanceof FormData;
+  const requestUrl =
+    typeof url === "string" && /^https?:\/\//i.test(url) ? url : `${API_URL}${url}`;
 
   if (token && options.auth !== false) {
     headers.set("Authorization", `Bearer ${token}`);
@@ -333,7 +336,7 @@ async function apiFetch(url, options = {}) {
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(url, {
+  const response = await fetch(requestUrl, {
     method: options.method || "GET",
     headers,
     body: isFormData
@@ -392,10 +395,16 @@ function initFadeIn() {
       entries.forEach((entry) => {
         if (entry.isIntersecting) {
           entry.target.classList.add("visible");
+          observer.unobserve(entry.target);
         }
       });
     },
-    { threshold: 0.18 }
+    {
+      // Tall sections like the intelligence task lane may never hit a high
+      // intersection ratio on shorter screens, leaving a blank gap behind.
+      threshold: 0.01,
+      rootMargin: "0px 0px -6% 0px"
+    }
   );
 
   elements.forEach((element) => {
