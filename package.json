@@ -6,7 +6,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node scripts/dev-local.js"
   },
   "dependencies": {
     "@google/genai": "^1.50.1",

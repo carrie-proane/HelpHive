@@ -21,6 +21,8 @@ const PORT = Number(process.env.PORT || 3000);
 const JWT_SECRET = process.env.JWT_SECRET || "kindred-dev-secret";
 const DATABASE_URL =
   process.env.DATABASE_URL || "postgres://postgres:postgres@localhost:5432/kindredpune";
+const DB_LOCATION_MODE = String(process.env.DB_LOCATION_MODE || "postgis").trim().toLowerCase();
+const USE_POSTGIS = DB_LOCATION_MODE !== "jsonb";
 const REPORTS_DIR = path.join(__dirname, "generated-reports");
 const UPLOAD_DIR = path.join(__dirname, "uploads");
 const TEMPLATE_PATH = path.join(__dirname, "templates", "csr-report.hbs");
@@ -50,6 +52,7 @@ const sequelize = new Sequelize(DATABASE_URL, {
   logging: false,
   dialectOptions: process.env.DB_SSL === "true" ? { ssl: { require: true, rejectUnauthorized: false } } : {}
 });
+const LOCATION_DATA_TYPE = USE_POSTGIS ? DataTypes.GEOGRAPHY("POINT", 4326) : DataTypes.JSONB;
 
 const ROLE_ALIASES = {
   volunteer: "volunteer",
@@ -1184,7 +1187,7 @@ const Volunteer = sequelize.define(
       field: "vaccination_status"
     },
     location: {
-      type: DataTypes.GEOGRAPHY("POINT", 4326),
+      type: LOCATION_DATA_TYPE,
       allowNull: true
     }
   },
@@ -1313,7 +1316,7 @@ const Task = sequelize.define(
       field: "people_served"
     },
     location: {
-      type: DataTypes.GEOGRAPHY("POINT", 4326),
+      type: LOCATION_DATA_TYPE,
       allowNull: true
     },
     isAssigned: {
@@ -1598,7 +1601,9 @@ Task.hasMany(Review, { foreignKey: "task_id", as: "reviews" });
 
 async function ensureDatabase() {
   await sequelize.authenticate();
-  await sequelize.query("CREATE EXTENSION IF NOT EXISTS postgis;");
+  if (USE_POSTGIS) {
+    await sequelize.query("CREATE EXTENSION IF NOT EXISTS postgis;");
+  }
   await sequelize.sync();
   await sequelize.query(
     "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS technical_skills TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
@@ -1645,8 +1650,10 @@ async function ensureDatabase() {
   await sequelize.query(
     "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS time_windows TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
   );
-  await sequelize.query("CREATE INDEX IF NOT EXISTS volunteers_location_idx ON volunteers USING GIST (location);");
-  await sequelize.query("CREATE INDEX IF NOT EXISTS tasks_location_idx ON tasks USING GIST (location);");
+  if (USE_POSTGIS) {
+    await sequelize.query("CREATE INDEX IF NOT EXISTS volunteers_location_idx ON volunteers USING GIST (location);");
+    await sequelize.query("CREATE INDEX IF NOT EXISTS tasks_location_idx ON tasks USING GIST (location);");
+  }
 }
 
 async function ensureDirectories() {

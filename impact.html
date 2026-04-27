@@ -31,11 +31,15 @@
           </div>
         </a>
         <nav class="site-nav">
-          <a href="./index.html">Home</a>
-          <a href="./intelligence.html">Intelligence</a>
-          <a href="./community.html">Community</a>
-          <a href="./impact.html" class="is-active">Impact</a>
-          <a href="./join.html">Join</a>
+          <a href="./index.html" data-nav="home">Home</a>
+          <a href="./intelligence.html" data-nav="intelligence">Intelligence</a>
+          <a href="./community.html" data-nav="community">Community</a>
+          <a href="./impact.html" class="is-active" data-nav="impact">Impact</a>
+          <a href="./join.html" data-nav="join">Join</a>
+          <a href="./admin-dashboard.html" data-nav="admin_dashboard" data-role-tab="ngo_admin" hidden>Admin Dashboard</a>
+          <a href="./field-desk.html" data-nav="field_desk" data-role-tab="ngo_worker" hidden>Field Desk</a>
+          <a href="./my-tasks.html" data-nav="my_tasks" data-role-tab="volunteer" hidden>My Tasks</a>
+          <a href="./csr-dashboard.html" data-nav="csr_dashboard" data-role-tab="csr" hidden>CSR Dashboard</a>
         </nav>
         <div class="header-actions">
           <span class="pill-tag">CSR ready</span>
@@ -63,10 +67,10 @@
 
               <div class="page-hero-visual">
                 <article class="visual-card lavender">
-                  <span class="side-kicker">Street-level proof</span>
+                  
                   <img
                     class="media-contain"
-                    src="./065511da-2380-4fcd-a73a-e5da2210d21a.jpeg"
+                    src="WhatsApp Image 2026-04-24 at 23.17.11.jpeg"
                     alt="Illustrated Pune street scene"
                   />
                 </article>
@@ -203,19 +207,11 @@
 
             <div class="story-mosaic">
               <article class="stack-card coral">
-                <div
-                  class="story-visual story-placeholder story-placeholder-water"
-                  role="img"
-                  aria-label="Illustrated water support placeholder showing a water droplet and neighborhood water access lane"
-                >
-                  <svg viewBox="0 0 96 96" aria-hidden="true">
-                    <path d="M48 16C48 16 28 39 28 54C28 65 37 74 48 74C59 74 68 65 68 54C68 39 48 16 48 16Z" />
-                    <path d="M20 78H76" />
-                    <path d="M28 70L20 78" />
-                    <path d="M68 70L76 78" />
-                    <path d="M34 82H62" />
-                  </svg>
-                  <span class="story-placeholder-label">Household water support</span>
+                <div class="story-visual">
+                  <img
+                    src="https://images.pexels.com/photos/8814613/pexels-photo-8814613.jpeg?auto=compress&cs=tinysrgb&w=1200"
+                    alt="People collecting water together in an Indian community setting"
+                  />
                 </div>
                 <h3>Shivajinagar water lane</h3>
                 <p class="muted">
@@ -227,8 +223,8 @@
               <article class="stack-card teal">
                 <div class="story-visual">
                   <img
-                    src="./WhatsApp Image 2026-04-24 at 16.33.47.jpeg"
-                    alt="Volunteers and sanitation workers cleaning and repainting a street in Pune"
+                    src="https://images.pexels.com/photos/34232357/pexels-photo-34232357.jpeg?auto=compress&cs=tinysrgb&w=1200"
+                    alt="Sanitation workers cleaning an urban street together during the day"
                   />
                 </div>
                 <h3>Pimpri sanitation sweep</h3>
@@ -239,20 +235,11 @@
                 <div class="progress-spark"></div>
               </article>
               <article class="stack-card blue">
-                <div
-                  class="story-visual story-placeholder story-placeholder-kitchen"
-                  role="img"
-                  aria-label="Illustrated community kitchen placeholder showing a serving bowl and meal distribution label"
-                >
-                  <svg viewBox="0 0 96 96" aria-hidden="true">
-                    <path d="M22 56C22 46 34 40 48 40C62 40 74 46 74 56V58H22V56Z" />
-                    <path d="M28 58C30 67 38 74 48 74C58 74 66 67 68 58" />
-                    <path d="M32 33C32 33 30 24 36 18" />
-                    <path d="M48 32C48 32 46 23 52 17" />
-                    <path d="M64 33C64 33 62 24 68 18" />
-                    <path d="M20 58H76" />
-                  </svg>
-                  <span class="story-placeholder-label">Community kitchen support</span>
+                <div class="story-visual">
+                  <img
+                    src="https://images.pexels.com/photos/7705355/pexels-photo-7705355.jpeg?auto=compress&cs=tinysrgb&w=1200"
+                    alt="People preparing food together in a community kitchen"
+                  />
                 </div>
                 <h3>Kothrud volunteer kitchens</h3>
                 <p class="muted">
@@ -262,22 +249,11 @@
                 <div class="progress-spark"></div>
               </article>
               <article class="stack-card lavender">
-                <div
-                  class="story-visual story-placeholder story-placeholder-csr"
-                  role="img"
-                  aria-label="Illustrated CSR reporting placeholder showing a dashboard chart and impact review panel"
-                >
-                  <svg viewBox="0 0 96 96" aria-hidden="true">
-                    <rect x="18" y="24" width="60" height="44" rx="10" />
-                    <path d="M28 58V48" />
-                    <path d="M40 58V40" />
-                    <path d="M52 58V33" />
-                    <path d="M64 58V45" />
-                    <path d="M28 34H48" />
-                    <path d="M56 34H66" />
-                    <path d="M24 74H72" />
-                  </svg>
-                  <span class="story-placeholder-label">Impact review dashboard</span>
+                <div class="story-visual">
+                  <img
+                    src="https://images.pexels.com/photos/7109316/pexels-photo-7109316.jpeg?auto=compress&cs=tinysrgb&w=1200"
+                    alt="Laptop displaying charts and analytics for impact reporting"
+                  />
                 </div>
                 <h3>CSR insight loop</h3>
                 <p class="muted">

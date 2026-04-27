@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KindredPune | CSR Dashboard</title>
+    <meta
+      name="description"
+      content="CSR partner dashboard for KindredPune."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Fraunces:opsz,wght@9..144,500;9..144,600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-theme="impact" data-guard="auth" data-roles="csr">
+    <div class="page-shell">
+      <div class="ambient-shape one"></div>
+      <div class="ambient-shape two"></div>
+      <div class="ambient-shape three"></div>
+
+      <header class="site-header">
+        <a class="brand" href="./index.html">
+          <div class="brand-mark"></div>
+          <div class="brand-copy">
+            <strong>KindredPune</strong>
+            <span>Civic intelligence, made human</span>
+          </div>
+        </a>
+        <nav class="site-nav">
+          <a href="./index.html" data-nav="home">Home</a>
+          <a href="./intelligence.html" data-nav="intelligence">Intelligence</a>
+          <a href="./community.html" data-nav="community">Community</a>
+          <a href="./impact.html" data-nav="impact">Impact</a>
+          <a href="./admin-dashboard.html" data-nav="admin_dashboard" data-role-tab="ngo_admin" hidden>Admin Dashboard</a>
+          <a href="./field-desk.html" data-nav="field_desk" data-role-tab="ngo_worker" hidden>Field Desk</a>
+          <a href="./my-tasks.html" data-nav="my_tasks" data-role-tab="volunteer" hidden>My Tasks</a>
+          <a href="./csr-dashboard.html" class="is-active" data-nav="csr_dashboard" data-role-tab="csr" hidden>CSR Dashboard</a>
+        </nav>
+        <div class="header-actions">
+          <span class="pill-tag">CSR dashboard</span>
+        </div>
+      </header>
+
+      <main>
+        <section class="page-hero fade-in">
+          <div class="page-hero-panel">
+            <div class="page-hero-grid slim">
+              <div class="page-hero-copy">
+                <span class="eyebrow">CSR Partner</span>
+                <h1>See support translate into ward-level movement.</h1>
+                <p>
+                  This dashboard keeps partner reporting focused on live outcomes,
+                  downloadable evidence, and trend lines tied back to the field.
+                </p>
+                <div class="hero-actions">
+                  <a class="cta-button" href="#csrOutcomes">Open partner metrics</a>
+                  <a class="ghost-button" href="./profile.html">View linked profile</a>
+                </div>
+              </div>
+              <div class="page-hero-visual">
+                <article class="visual-card lavender">
+                  <span class="side-kicker">Partner view</span>
+                  <ul class="timeline-list">
+                    <li><span>Metrics</span><strong>Volunteer hours, funds, reach</strong></li>
+                    <li><span>Narrative</span><strong>Operational story from live data</strong></li>
+                    <li><span>Receipt</span><strong>Export-ready contribution evidence</strong></li>
+                  </ul>
+                </article>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in" id="csrOutcomes">
+          <div class="sheet lavender impact-sheet">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Outcomes at a glance</span>
+                <h2>Live partner metrics without leaving the role view</h2>
+              </div>
+              <p>
+                Company-linked outcomes, receipt lines, and reporting history are
+                loaded here for the current CSR account.
+              </p>
+            </div>
+
+            <div id="csrAuthPrompt" class="status-banner info hidden">
+              <strong>CSR dashboard sign-in</strong>
+              <span>Log in with a CSR account to open live partner metrics and download the latest receipt.</span>
+            </div>
+
+            <div id="csrLoadingState" class="status-banner info hidden">
+              <strong>Loading CSR dashboard</strong>
+              <span>Pulling company metrics, task receipts, and reporting history.</span>
+            </div>
+
+            <article class="dashboard-shell sand">
+              <form id="csrFilterForm" class="form-grid">
+                <label>
+                  Company
+                  <select id="csrCompanyFilter" name="companyId"></select>
+                </label>
+                <label>
+                  Start date
+                  <input id="csrStartDate" name="startDate" type="date" />
+                </label>
+                <label>
+                  End date
+                  <input id="csrEndDate" name="endDate" type="date" />
+                </label>
+                <button class="ghost-button" type="submit">Apply range</button>
+              </form>
+            </article>
+
+            <div class="impact-grid" id="csrMetricCards">
+              <article class="metric-card">
+                <span class="panel-kicker">Volunteer hours</span>
+                <strong>Loading</strong>
+                <p class="muted">Linked contribution metrics will load here.</p>
+                <div class="spark"></div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in">
+          <div class="sheet coral">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Reporting that feels real</span>
+                <h2>Partner evidence grounded in live operations</h2>
+              </div>
+              <p>
+                The same operational layer that helps field teams route work also
+                powers the story told back to support partners.
+              </p>
+            </div>
+
+            <div class="split-panel">
+              <article class="chart-card">
+                <h3>Partner narrative</h3>
+                <p class="muted" id="csrNarrative">
+                  Log in to see the live narrative generated from completed field work.
+                </p>
+                <div id="csrImpactChart" class="csr-chart-panel">
+                  <div class="chart-placeholder">
+                    Volunteer-hour trend will appear here once the dashboard finishes loading.
+                  </div>
+                </div>
+              </article>
+
+              <article class="detail-card sand">
+                <h3>Impact receipt lane</h3>
+                <p class="muted">
+                  Completed tasks linked to partner funding appear here as a ready-to-download receipt.
+                </p>
+                <ul class="report-row" id="csrReceiptList">
+                  <li>
+                    <span>Receipt lines</span>
+                    <strong>Loading</strong>
+                  </li>
+                </ul>
+                <button id="downloadReceiptButton" class="cta-button hidden" type="button">Export report</button>
+              </article>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>KindredPune CSR role view</span>
+        <span>Partner metrics, reporting, and receipt history</span>
+      </footer>
+    </div>
+
+    <script src="./main.js"></script>
+  </body>
+</html>
