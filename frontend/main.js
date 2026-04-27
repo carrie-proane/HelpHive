@@ -18,6 +18,7 @@ const roleHomes = {
   corporate: "./impact.html"
 };
 
+const API_URL = "https://backend-service-321419338933.us-central1.run.app";
 
 function hexToRgba(hex, alpha) {
   const value = hex.replace("#", "");
@@ -116,6 +117,8 @@ async function apiFetch(url, options = {}) {
   const token = getToken();
   const headers = new Headers(options.headers || {});
   const isFormData = options.body instanceof FormData;
+  const requestUrl =
+    typeof url === "string" && /^https?:\/\//i.test(url) ? url : `${API_URL}${url}`;
 
   if (token && options.auth !== false) {
     headers.set("Authorization", `Bearer ${token}`);
@@ -125,7 +128,7 @@ async function apiFetch(url, options = {}) {
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(url, {
+  const response = await fetch(requestUrl, {
     method: options.method || "GET",
     headers,
     body: isFormData
