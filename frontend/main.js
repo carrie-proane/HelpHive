@@ -14,39 +14,39 @@ const roleLabels = {
 };
 
 const roleHomes = {
-  ngo_admin: "./admin-dashboard.html",
-  ngo_worker: "./field-desk.html",
-  volunteer: "./my-tasks.html",
-  csr: "./csr-dashboard.html"
+  ngo_admin: "./admin.html",
+  ngo_worker: "./report.html",
+  volunteer: "./intelligence.html",
+  csr: "./impact.html"
 };
 
 const visibleTabsByRole = {
   ngo_admin: ["home", "intelligence", "admin_dashboard"],
   ngo_worker: ["home", "intelligence", "field_desk"],
   volunteer: ["home", "intelligence", "my_tasks"],
-  csr: ["home", "csr_dashboard"]
+  csr: ["home", "impact", "csr_dashboard"]
 };
 
 const roleNavigationTabs = {
   ngo_admin: {
     key: "admin_dashboard",
     label: "Admin Dashboard",
-    href: "./admin-dashboard.html"
+    href: "./admin.html"
   },
   ngo_worker: {
     key: "field_desk",
     label: "Field Desk",
-    href: "./field-desk.html"
+    href: "./report.html"
   },
   volunteer: {
     key: "my_tasks",
     label: "My Tasks",
-    href: "./my-tasks.html"
+    href: "./intelligence.html"
   },
   csr: {
     key: "csr_dashboard",
     label: "CSR Dashboard",
-    href: "./csr-dashboard.html"
+    href: "./impact.html"
   }
 };
 

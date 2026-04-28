@@ -5,6 +5,35 @@
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/admin-dashboard.html",
+        "destination": "/admin.html"
+      },
+      {
+        "source": "/my-tasks.html",
+        "destination": "/intelligence.html"
+      },
+      {
+        "source": "/csr-dashboard.html",
+        "destination": "/impact.html"
+      },
+      {
+        "source": "/field-desk.html",
+        "destination": "/report.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "**/*.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
     ]
   }
 }
