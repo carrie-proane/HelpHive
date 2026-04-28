@@ -58,6 +58,14 @@ const GEMINI_AUDIO_MODEL = process.env.GEMINI_AUDIO_MODEL || "gemini-2.5-flash";
 const MAP_REFRESH_CENTER = { lat: 18.5204, lng: 73.8567 };
 const DB_CONNECTION_RETRY_ATTEMPTS = Number(process.env.DB_CONNECTION_RETRY_ATTEMPTS || 12);
 const DB_CONNECTION_RETRY_DELAY_MS = Number(process.env.DB_CONNECTION_RETRY_DELAY_MS || 2500);
+const HELPHIVE_LOGIN_DOMAIN = "@helphive.org";
+const LEGACY_LOGIN_DOMAIN = "@kindredpune.org";
+const ROLE_PAGE_FILES = [
+  "admin-dashboard.html",
+  "field-desk.html",
+  "my-tasks.html",
+  "csr-dashboard.html"
+];
 
 function isRunningInDocker() {
   return fs.existsSync("/.dockerenv");
@@ -452,6 +460,29 @@ function createId(prefix) {
 
 function normalizeRole(role) {
   return ROLE_ALIASES[String(role || "").trim().toLowerCase()] || null;
+}
+
+function getLoginEmailCandidates(email = "") {
+  const normalizedEmail = String(email || "").trim().toLowerCase();
+  if (!normalizedEmail) {
+    return [];
+  }
+
+  const candidates = new Set([normalizedEmail]);
+
+  if (normalizedEmail.endsWith(HELPHIVE_LOGIN_DOMAIN)) {
+    candidates.add(
+      `${normalizedEmail.slice(0, -HELPHIVE_LOGIN_DOMAIN.length)}${LEGACY_LOGIN_DOMAIN}`
+    );
+  }
+
+  if (normalizedEmail.endsWith(LEGACY_LOGIN_DOMAIN)) {
+    candidates.add(
+      `${normalizedEmail.slice(0, -LEGACY_LOGIN_DOMAIN.length)}${HELPHIVE_LOGIN_DOMAIN}`
+    );
+  }
+
+  return [...candidates];
 }
 
 function normalizeArray(value) {
@@ -1922,7 +1953,7 @@ async function seedDatabase() {
       name: company.name,
       details:
         company.details ||
-        `${company.name} contributes funds and volunteer hours into KindredPune response lanes.`
+        `${company.name} contributes funds and volunteer hours into HelpHive response lanes.`
     });
     companyIdMap.set(company.id, created.id);
   }
@@ -3234,6 +3265,12 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/generated-reports", express.static(REPORTS_DIR));
 app.use(express.static(FRONTEND_DIR));
 
+ROLE_PAGE_FILES.forEach((pageFile) => {
+  app.get(`/${pageFile}`, (request, response) => {
+    response.sendFile(path.join(ROOT_DIR, pageFile));
+  });
+});
+
 app.post("/api/signup", async (request, response, next) => {
   try {
     const role = normalizeRole(request.body.role);
@@ -3263,7 +3300,7 @@ app.post("/api/signup", async (request, response, next) => {
       const company = await Company.create({
         id: createId("company"),
         name: companyName,
-        details: `${companyName} joined KindredPune through the public signup flow.`
+        details: `${companyName} joined HelpHive through the public signup flow.`
       });
       companyId = company.id;
     }
@@ -3313,7 +3350,11 @@ app.post("/api/login", async (request, response, next) => {
     }
 
     const user = await User.findOne({
-      where: { email },
+      where: {
+        email: {
+          [Op.in]: getLoginEmailCandidates(email)
+        }
+      },
       include: [
         { model: Volunteer, as: "volunteerProfile" },
         { model: Company, as: "company" }
@@ -3380,7 +3421,7 @@ app.post("/api/whatsapp", async (request, response, next) => {
     }
 
     let reply =
-      "Welcome to KindredPune. Please share the locality first, or send a WhatsApp location pin so we can start the intake.";
+      "Welcome to HelpHive. Please share the locality first, or send a WhatsApp location pin so we can start the intake.";
     const ngoUser =
       (await User.findOne({ where: { role: "ngo" }, order: [["name", "ASC"]] })) ||
       (await User.findOne({ where: { role: "admin" }, order: [["name", "ASC"]] }));
