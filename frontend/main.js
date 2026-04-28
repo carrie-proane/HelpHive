@@ -4,6 +4,8 @@ const fallbackSeverityColors = {
   stable: "#6aa89e"
 };
 
+const BRAND_NAME = "HelpHive";
+
 const roleLabels = {
   ngo_admin: "NGO Admin",
   ngo_worker: "NGO Worker",
@@ -178,6 +180,174 @@ function applyRoleBasedNavigation(role) {
 
     link.hidden = !visibleTabs.includes(navKey);
   });
+}
+
+function ensureMobileNavigationScaffold() {
+  const header = document.querySelector(".site-header");
+  if (!header) {
+    return {};
+  }
+
+  let toggle = header.querySelector(".mobile-menu-toggle");
+  if (!toggle) {
+    toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "mobile-menu-toggle";
+    toggle.innerHTML = '<span aria-hidden="true">☰</span>';
+    toggle.setAttribute("aria-label", "Open menu");
+    toggle.setAttribute("aria-expanded", "false");
+    const anchor = header.querySelector(".header-actions");
+    header.insertBefore(toggle, anchor || null);
+  }
+
+  let mobileNav = document.querySelector(".mobile-nav");
+  if (!mobileNav) {
+    mobileNav = document.createElement("nav");
+    mobileNav.className = "mobile-nav hidden";
+    mobileNav.id = "mobileNav";
+    mobileNav.setAttribute("aria-label", "Mobile navigation");
+    header.insertAdjacentElement("afterend", mobileNav);
+  }
+
+  toggle.setAttribute("aria-controls", mobileNav.id);
+
+  if (!toggle.dataset.bound) {
+    toggle.addEventListener("click", () => {
+      setMobileMenuState(mobileNav.classList.contains("hidden"));
+    });
+    toggle.dataset.bound = "true";
+  }
+
+  if (!mobileNav.dataset.bound) {
+    mobileNav.addEventListener("click", (event) => {
+      const target = event.target.closest("a, button");
+      if (target) {
+        closeMobileNavigation();
+      }
+    });
+    mobileNav.dataset.bound = "true";
+  }
+
+  if (!document.body.dataset.mobileNavBound) {
+    document.addEventListener("click", (event) => {
+      if (mobileNav.classList.contains("hidden")) {
+        return;
+      }
+
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        !header.contains(target) &&
+        !mobileNav.contains(target)
+      ) {
+        closeMobileNavigation();
+      }
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        closeMobileNavigation();
+      }
+    });
+
+    window.addEventListener("resize", () => {
+      if (window.innerWidth > 768) {
+        closeMobileNavigation();
+      }
+    });
+
+    document.body.dataset.mobileNavBound = "true";
+  }
+
+  return { header, toggle, mobileNav };
+}
+
+function setMobileMenuState(isOpen) {
+  const { header, toggle, mobileNav } = ensureMobileNavigationScaffold();
+  if (!header || !toggle || !mobileNav) {
+    return;
+  }
+
+  toggle.setAttribute("aria-expanded", String(isOpen));
+  toggle.setAttribute("aria-label", isOpen ? "Close menu" : "Open menu");
+  toggle.innerHTML = `<span aria-hidden="true">${isOpen ? "×" : "☰"}</span>`;
+  header.classList.toggle("mobile-menu-open", isOpen);
+  mobileNav.classList.toggle("hidden", !isOpen);
+}
+
+function closeMobileNavigation() {
+  setMobileMenuState(false);
+}
+
+function getVisibleNavigationLinks() {
+  return Array.from(document.querySelectorAll(".site-nav a[data-nav]"))
+    .filter((link) => link instanceof HTMLAnchorElement && !link.hidden)
+    .map((link) => ({
+      href: link.getAttribute("href") || "#",
+      label: link.textContent.trim(),
+      active: link.classList.contains("is-active")
+    }));
+}
+
+function renderMobileNavigation(currentUser) {
+  const { mobileNav } = ensureMobileNavigationScaffold();
+  if (!mobileNav) {
+    return;
+  }
+
+  const visibleLinks = getVisibleNavigationLinks();
+  const roleKey = getRoleKey(currentUser);
+  const currentLabel =
+    document.querySelector(".header-actions")?.dataset.baseLabel || "";
+  const navLinksMarkup = visibleLinks
+    .map(
+      (link) => `
+        <a class="mobile-nav-link ${link.active ? "is-active" : ""}" href="${link.href}">
+          ${escapeHtml(link.label)}
+        </a>
+      `
+    )
+    .join("");
+
+  let utilityMarkup = "";
+
+  if (currentUser) {
+    utilityMarkup = `
+      <div class="mobile-nav-user">
+        <div class="user-badge">
+          <strong>${escapeHtml(currentUser.name || BRAND_NAME)}</strong>
+          <span>${escapeHtml(roleLabels[roleKey] || prettyLabel(currentUser.role))}</span>
+        </div>
+      </div>
+      <div class="mobile-nav-actions">
+        <a class="ghost-button" href="./profile.html">Profile</a>
+        <button class="soft-button" type="button" data-logout>Logout</button>
+      </div>
+    `;
+  } else {
+    utilityMarkup = `
+      <div class="mobile-nav-actions">
+        <a class="ghost-button" href="./login.html">Log in</a>
+        <a class="cta-button" href="./signup.html">Sign up</a>
+      </div>
+    `;
+  }
+
+  mobileNav.innerHTML = `
+    <div class="mobile-nav-shell">
+      ${
+        currentLabel
+          ? `<span class="pill-tag mobile-nav-status">${escapeHtml(currentLabel)}</span>`
+          : ""
+      }
+      <div class="mobile-nav-links">
+        ${navLinksMarkup}
+      </div>
+      ${utilityMarkup}
+    </div>
+  `;
+
+  closeMobileNavigation();
 }
 
 function escapeHtml(value = "") {
@@ -466,7 +636,7 @@ function renderHeaderActions(currentUser) {
   headerActions.forEach((slot) => {
     if (!slot.dataset.baseLabel) {
       const currentPill = slot.querySelector(".pill-tag");
-      slot.dataset.baseLabel = currentPill ? currentPill.textContent.trim() : "KindredPune";
+      slot.dataset.baseLabel = currentPill ? currentPill.textContent.trim() : BRAND_NAME;
     }
 
     const pill = `<span class="pill-tag">${slot.dataset.baseLabel}</span>`;
@@ -497,6 +667,7 @@ function renderHeaderActions(currentUser) {
   });
 
   applyRoleBasedNavigation(roleKey);
+  renderMobileNavigation(currentUser);
 
   document.querySelectorAll("[data-logout]").forEach((button) => {
     button.addEventListener("click", () => {

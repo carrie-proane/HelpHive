@@ -235,7 +235,7 @@ async function seedDatabase() {
     const userDefinitions = [
       {
         name: "Asha Kulkarni",
-        email: "admin@kindredpune.org",
+        email: "admin@helphive.org",
         role: "admin",
         skills: ["coordination", "governance", "review"],
         languages: ["Marathi", "Hindi", "English"],
@@ -245,7 +245,7 @@ async function seedDatabase() {
       },
       {
         name: "Meera Patil",
-        email: "ngo@kindredpune.org",
+        email: "ngo@helphive.org",
         role: "ngo_worker",
         skills: ["community outreach", "survey intake", "routing"],
         languages: ["Marathi", "Hindi"],
@@ -255,7 +255,7 @@ async function seedDatabase() {
       },
       {
         name: "Aditya Kale",
-        email: "volunteer@kindredpune.org",
+        email: "volunteer@helphive.org",
         role: "volunteer",
         skills: ["logistics", "meal distribution", "marathi"],
         languages: ["Marathi", "Hindi"],
@@ -265,7 +265,7 @@ async function seedDatabase() {
       },
       {
         name: "Fatima Shaikh",
-        email: "buddy@kindredpune.org",
+        email: "buddy@helphive.org",
         role: "volunteer",
         skills: ["medical", "triage", "marathi"],
         languages: ["Marathi", "Hindi", "Urdu"],
@@ -275,7 +275,7 @@ async function seedDatabase() {
       },
       {
         name: "Rohan Deshpande",
-        email: "csr@kindredpune.org",
+        email: "csr@helphive.org",
         role: "csr_partner",
         skills: ["reporting", "funding"],
         languages: ["English", "Hindi"],
@@ -313,7 +313,7 @@ async function seedDatabase() {
 
     const volunteerDefs = [
       {
-        email: "volunteer@kindredpune.org",
+        email: "volunteer@helphive.org",
         latitude: AREA_COORDINATES.kothrud.latitude,
         longitude: AREA_COORDINATES.kothrud.longitude,
         skills: ["logistics", "meal distribution", "marathi"],
@@ -321,7 +321,7 @@ async function seedDatabase() {
         availability: { label: "Weekends and evenings" }
       },
       {
-        email: "buddy@kindredpune.org",
+        email: "buddy@helphive.org",
         latitude: AREA_COORDINATES.yerawada.latitude,
         longitude: AREA_COORDINATES.yerawada.longitude,
         skills: ["medical", "triage", "marathi"],
@@ -368,7 +368,7 @@ async function seedDatabase() {
         longitude: AREA_COORDINATES.shivajinagar.longitude,
         source: "survey",
         status: "open",
-        ngoId: users["ngo@kindredpune.org"],
+        ngoId: users["ngo@helphive.org"],
         requiredSkills: ["logistics", "marathi", "community outreach"],
         sponsorCompanyId: companies["Sunrise CSR Collective"],
         metadata: { confidence: 0.74, extractedText: "पाणी कमी आहे शिवाजीनगर 14 घरे" },
@@ -385,7 +385,7 @@ async function seedDatabase() {
         longitude: AREA_COORDINATES.pimpri.longitude,
         source: "whatsapp",
         status: "open",
-        ngoId: users["ngo@kindredpune.org"],
+        ngoId: users["ngo@helphive.org"],
         requiredSkills: ["logistics", "community outreach"],
         sponsorCompanyId: companies["Aurora Impact Partners"],
         metadata: { confidence: 0.91 },
@@ -402,7 +402,7 @@ async function seedDatabase() {
         longitude: AREA_COORDINATES.kothrud.longitude,
         source: "manual",
         status: "open",
-        ngoId: users["ngo@kindredpune.org"],
+        ngoId: users["ngo@helphive.org"],
         requiredSkills: ["meal distribution", "logistics"],
         sponsorCompanyId: companies["Aurora Impact Partners"],
         metadata: { confidence: 0.95 },
@@ -419,7 +419,7 @@ async function seedDatabase() {
         longitude: AREA_COORDINATES.yerawada.longitude,
         source: "voice",
         status: "in_progress",
-        ngoId: users["ngo@kindredpune.org"],
+        ngoId: users["ngo@helphive.org"],
         requiredSkills: ["medical", "triage", "marathi"],
         sponsorCompanyId: companies["Sunrise CSR Collective"],
         metadata: { confidence: 0.86 },
@@ -437,7 +437,7 @@ async function seedDatabase() {
         longitude: AREA_COORDINATES.kasba.longitude,
         source: "survey",
         status: "open",
-        ngoId: users["ngo@kindredpune.org"],
+        ngoId: users["ngo@helphive.org"],
         requiredSkills: ["logistics", "marathi", "community outreach"],
         sponsorCompanyId: companies["Sunrise CSR Collective"],
         metadata: { confidence: 0.82 },
@@ -454,7 +454,7 @@ async function seedDatabase() {
         longitude: AREA_COORDINATES.hadapsar.longitude,
         source: "whatsapp",
         status: "completed",
-        ngoId: users["ngo@kindredpune.org"],
+        ngoId: users["ngo@helphive.org"],
         requiredSkills: ["meal distribution", "logistics"],
         sponsorCompanyId: companies["Sunrise CSR Collective"],
         metadata: { confidence: 0.93 },
@@ -513,8 +513,8 @@ async function seedDatabase() {
       `,
       [
         taskIds["Fever cluster - Yerawada"],
-        volunteerIds["buddy@kindredpune.org"],
-        volunteerIds["volunteer@kindredpune.org"],
+        volunteerIds["buddy@helphive.org"],
+        volunteerIds["volunteer@helphive.org"],
         taskIds["Ration restock - Hadapsar"]
       ]
     );
@@ -527,7 +527,7 @@ async function seedDatabase() {
       `,
       [
         taskIds["Fever cluster - Yerawada"],
-        [users["buddy@kindredpune.org"], users["volunteer@kindredpune.org"]]
+        [users["buddy@helphive.org"], users["volunteer@helphive.org"]]
       ]
     );
 
@@ -539,7 +539,7 @@ async function seedDatabase() {
       `,
       [
         taskIds["Ration restock - Hadapsar"],
-        [users["buddy@kindredpune.org"], users["volunteer@kindredpune.org"]]
+        [users["buddy@helphive.org"], users["volunteer@helphive.org"]]
       ]
     );
 
