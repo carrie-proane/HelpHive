@@ -67,6 +67,142 @@ const pageNavKeys = {
 };
 
 const API_URL = "https://backend-service-321419338933.us-central1.run.app";
+const DEMO_LOCATION_STORAGE_KEY = "helpHiveDemoLocation";
+const LEGACY_LOCATION_STORAGE_KEY = "location";
+const DEFAULT_DEMO_LOCATION = {
+  country: "India",
+  state: "Maharashtra",
+  city: "Pune"
+};
+const demoLocationsByCity = {
+  Pune: DEFAULT_DEMO_LOCATION,
+  Mumbai: {
+    country: "India",
+    state: "Maharashtra",
+    city: "Mumbai"
+  },
+  Delhi: {
+    country: "India",
+    state: "Delhi",
+    city: "Delhi"
+  },
+  Bangalore: {
+    country: "India",
+    state: "Karnataka",
+    city: "Bangalore"
+  }
+};
+let currentLocation = { ...DEFAULT_DEMO_LOCATION };
+const cityContent = {
+  Pune: {
+    cityName: "Pune",
+    wardLabel: "Pune wards",
+    metaDescription:
+      "HelpHive is a community support layer for ward insights, NGO coordination, volunteer matching, and real-time action across Pune wards.",
+    examples: {
+      water: "Shivajinagar water lane",
+      sanitation: "Pimpri sanitation sweep",
+      kitchen: "Kothrud volunteer kitchens"
+    },
+    homeWaterCluster: "Shivajinagar + Kasba",
+    homeSanitationStatus: "Pimpri line sweep delayed",
+    intelligenceDrilldownTitle: "Shivajinagar ward card",
+    communityCtaCopy:
+      "See how the civic network turns into real coverage, resolution, and reporting across Pune wards.",
+    baseLocationPlaceholder: "Kothrud, Shivajinagar, Pimpri...",
+    faqCityQuestion: "Can HelpHive work beyond Pune?",
+    faqCityAnswer:
+      "Yes. Pune is shown as the selected demo city, but HelpHive is designed for ward-level operations across Indian cities.",
+    impactHeroAlt: "Community support scene in Pune",
+    impactWaterDescription:
+      "Refill gaps were surfaced earlier across Pune ward clusters, tanker routing stabilized, and household follow-ups stopped slipping past noon.",
+    impactSanitationDescription:
+      "Overflow reports lined up with route coverage across Pune, giving partner teams one clear cleanup picture instead of conflicting notes.",
+    impactKitchenDescription:
+      "Matching tightened around availability and prep training in Pune, which improved evening support consistency."
+  },
+  Mumbai: {
+    cityName: "Mumbai",
+    wardLabel: "Mumbai wards",
+    metaDescription:
+      "HelpHive is a community support layer for ward insights, NGO coordination, volunteer matching, and real-time action across Mumbai wards.",
+    examples: {
+      water: "Dharavi water access lane",
+      sanitation: "Andheri sanitation sweep",
+      kitchen: "Dadar volunteer kitchens"
+    },
+    homeWaterCluster: "Dharavi + Mahim",
+    homeSanitationStatus: "Andheri line sweep delayed",
+    intelligenceDrilldownTitle: "Dharavi ward card",
+    communityCtaCopy:
+      "See how the civic network turns into real coverage, resolution, and reporting across Mumbai wards.",
+    baseLocationPlaceholder: "Dharavi, Andheri, Dadar...",
+    faqCityQuestion: "Can HelpHive work beyond Mumbai?",
+    faqCityAnswer:
+      "Yes. Mumbai is shown as the selected demo city, but HelpHive is designed for ward-level operations across Indian cities.",
+    impactHeroAlt: "Community support scene in Mumbai",
+    impactWaterDescription:
+      "Refill gaps were surfaced earlier across Mumbai ward clusters, and follow-ups became easier to coordinate.",
+    impactSanitationDescription:
+      "Overflow reports lined up with route coverage across Mumbai, giving partner teams one clear cleanup picture instead of conflicting notes.",
+    impactKitchenDescription:
+      "Matching tightened around availability and prep training in Mumbai, which improved evening support consistency."
+  },
+  Delhi: {
+    cityName: "Delhi",
+    wardLabel: "Delhi wards",
+    metaDescription:
+      "HelpHive is a community support layer for ward insights, NGO coordination, volunteer matching, and real-time action across Delhi wards.",
+    examples: {
+      water: "Okhla water access lane",
+      sanitation: "Karol Bagh sanitation sweep",
+      kitchen: "Lajpat Nagar volunteer kitchens"
+    },
+    homeWaterCluster: "Okhla + Kalkaji",
+    homeSanitationStatus: "Karol Bagh line sweep delayed",
+    intelligenceDrilldownTitle: "Okhla ward card",
+    communityCtaCopy:
+      "See how the civic network turns into real coverage, resolution, and reporting across Delhi wards.",
+    baseLocationPlaceholder: "Okhla, Karol Bagh, Lajpat Nagar...",
+    faqCityQuestion: "Can HelpHive work beyond Delhi?",
+    faqCityAnswer:
+      "Yes. Delhi is shown as the selected demo city, but HelpHive is designed for ward-level operations across Indian cities.",
+    impactHeroAlt: "Community support scene in Delhi",
+    impactWaterDescription:
+      "Refill gaps were surfaced earlier across Delhi ward clusters, and household follow-ups became easier to coordinate.",
+    impactSanitationDescription:
+      "Overflow reports lined up with route coverage across Delhi, giving partner teams one clear cleanup picture instead of conflicting notes.",
+    impactKitchenDescription:
+      "Matching tightened around availability and prep training in Delhi, which improved evening support consistency."
+  },
+  Bangalore: {
+    cityName: "Bengaluru",
+    wardLabel: "Bengaluru wards",
+    metaDescription:
+      "HelpHive is a community support layer for ward insights, NGO coordination, volunteer matching, and real-time action across Bengaluru wards.",
+    examples: {
+      water: "Indiranagar water access lane",
+      sanitation: "Koramangala sanitation sweep",
+      kitchen: "Jayanagar volunteer kitchens"
+    },
+    homeWaterCluster: "Indiranagar + Ulsoor",
+    homeSanitationStatus: "Koramangala line sweep delayed",
+    intelligenceDrilldownTitle: "Indiranagar ward card",
+    communityCtaCopy:
+      "See how the civic network turns into real coverage, resolution, and reporting across Bengaluru wards.",
+    baseLocationPlaceholder: "Indiranagar, Koramangala, Jayanagar...",
+    faqCityQuestion: "Can HelpHive work beyond Bengaluru?",
+    faqCityAnswer:
+      "Yes. Bengaluru is shown as the selected demo city, but HelpHive is designed for ward-level operations across Indian cities.",
+    impactHeroAlt: "Community support scene in Bengaluru",
+    impactWaterDescription:
+      "Refill gaps were surfaced earlier across Bengaluru ward clusters, and household follow-ups became easier to coordinate.",
+    impactSanitationDescription:
+      "Overflow reports lined up with route coverage across Bengaluru, giving partner teams one clear cleanup picture instead of conflicting notes.",
+    impactKitchenDescription:
+      "Matching tightened around availability and prep training in Bengaluru, which improved evening support consistency."
+  }
+};
 
 function hexToRgba(hex, alpha) {
   const value = hex.replace("#", "");
@@ -101,6 +237,169 @@ function prettyLabel(value = "") {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
+}
+
+function getDemoLocationForCity(city) {
+  return demoLocationsByCity[city] || DEFAULT_DEMO_LOCATION;
+}
+
+function getCityContent(city) {
+  const selected = cityContent[city];
+  if (selected) {
+    return {
+      ...selected,
+      impactWaterTitle: selected.examples.water,
+      impactSanitationTitle: selected.examples.sanitation,
+      impactKitchenTitle: selected.examples.kitchen
+    };
+  }
+
+  const fallbackCity = String(city || DEFAULT_DEMO_LOCATION.city).trim() || DEFAULT_DEMO_LOCATION.city;
+  const readableCity = prettyLabel(fallbackCity);
+  return {
+    cityName: readableCity,
+    wardLabel: `${readableCity} wards`,
+    metaDescription:
+      `HelpHive is a community support layer for ward insights, NGO coordination, volunteer matching, and real-time action across ${readableCity} wards.`,
+    examples: {
+      water: `${readableCity} water access lane`,
+      sanitation: `${readableCity} sanitation sweep`,
+      kitchen: `${readableCity} volunteer kitchens`
+    },
+    homeWaterCluster: `${readableCity} ward cluster`,
+    homeSanitationStatus: `${readableCity} line sweep delayed`,
+    intelligenceDrilldownTitle: `${readableCity} ward card`,
+    communityCtaCopy:
+      `See how the civic network turns into real coverage, resolution, and reporting across ${readableCity} wards.`,
+    baseLocationPlaceholder: `${readableCity} ward, neighborhood, locality...`,
+    faqCityQuestion: `Can HelpHive work beyond ${readableCity}?`,
+    faqCityAnswer:
+      `Yes. ${readableCity} is shown as the selected demo city, but HelpHive is designed for ward-level operations across Indian cities.`,
+    impactHeroAlt: `Community support scene in ${readableCity}`,
+    impactWaterTitle: `${readableCity} water access lane`,
+    impactWaterDescription:
+      `Refill gaps were surfaced earlier across ${readableCity} ward clusters, and follow-ups became easier to coordinate.`,
+    impactSanitationTitle: `${readableCity} sanitation sweep`,
+    impactSanitationDescription:
+      `Overflow reports lined up with route coverage across ${readableCity}, giving partner teams one clear cleanup picture instead of conflicting notes.`,
+    impactKitchenTitle: `${readableCity} volunteer kitchens`,
+    impactKitchenDescription:
+      `Matching tightened around availability and prep training in ${readableCity}, which improved evening support consistency.`
+  };
+}
+
+function loadCurrentLocation() {
+  try {
+    const legacyLocation = localStorage.getItem(LEGACY_LOCATION_STORAGE_KEY);
+    if (legacyLocation) {
+      const parsed = JSON.parse(legacyLocation);
+      if (parsed?.city) {
+        return { ...getDemoLocationForCity(parsed.city) };
+      }
+    }
+
+    const storedCity = localStorage.getItem(DEMO_LOCATION_STORAGE_KEY);
+    return { ...getDemoLocationForCity(storedCity) };
+  } catch (error) {
+    return { ...DEFAULT_DEMO_LOCATION };
+  }
+}
+
+function persistCurrentLocation() {
+  try {
+    localStorage.setItem(DEMO_LOCATION_STORAGE_KEY, currentLocation.city);
+    localStorage.setItem(LEGACY_LOCATION_STORAGE_KEY, JSON.stringify(currentLocation));
+  } catch (error) {
+    // Ignore storage failures and keep the in-memory default.
+  }
+}
+
+function renderCityContext() {
+  const selectedCityContent = getCityContent(currentLocation.city);
+
+  document.querySelectorAll("[data-city-name]").forEach((node) => {
+    node.textContent = selectedCityContent.cityName;
+  });
+
+  document.querySelectorAll("[data-city-context-label]").forEach((node) => {
+    node.textContent = `Viewing ${selectedCityContent.cityName} demo`;
+  });
+
+  document.querySelectorAll("[data-city-selector]").forEach((selector) => {
+    if (selector instanceof HTMLSelectElement) {
+      selector.value = currentLocation.city;
+    }
+  });
+
+  document.querySelectorAll("[data-city-text]").forEach((node) => {
+    const key = node.dataset.cityText;
+    const value = key ? selectedCityContent[key] : "";
+    if (typeof value === "string" && value) {
+      node.textContent = value;
+    }
+  });
+
+  document.querySelectorAll("[data-city-placeholder]").forEach((node) => {
+    if (!(node instanceof HTMLInputElement) && !(node instanceof HTMLTextAreaElement)) {
+      return;
+    }
+
+    const key = node.dataset.cityPlaceholder;
+    const value = key ? selectedCityContent[key] : "";
+    if (typeof value === "string" && value) {
+      node.placeholder = value;
+    }
+  });
+
+  document.querySelectorAll("[data-city-alt]").forEach((node) => {
+    if (!(node instanceof HTMLImageElement)) {
+      return;
+    }
+
+    const key = node.dataset.cityAlt;
+    const value = key ? selectedCityContent[key] : "";
+    if (typeof value === "string" && value) {
+      node.alt = value;
+    }
+  });
+
+  const descriptionTag = document.querySelector('meta[name="description"]');
+  if (descriptionTag && selectedCityContent.metaDescription) {
+    descriptionTag.setAttribute("content", selectedCityContent.metaDescription);
+  }
+}
+
+function setCurrentLocation(city) {
+  currentLocation = { ...getDemoLocationForCity(city) };
+  persistCurrentLocation();
+  renderCityContext();
+}
+
+function initCityContext() {
+  if (
+    !document.querySelector("[data-city-selector]") &&
+    !document.querySelector("[data-city-name]") &&
+    !document.querySelector("[data-city-context-label]") &&
+    !document.querySelector("[data-city-text]") &&
+    !document.querySelector("[data-city-placeholder]") &&
+    !document.querySelector("[data-city-alt]")
+  ) {
+    return;
+  }
+
+  currentLocation = loadCurrentLocation();
+  renderCityContext();
+
+  document.querySelectorAll("[data-city-selector]").forEach((selector) => {
+    if (!(selector instanceof HTMLSelectElement) || selector.dataset.bound === "true") {
+      return;
+    }
+
+    selector.addEventListener("change", (event) => {
+      setCurrentLocation(event.target.value);
+    });
+    selector.dataset.bound = "true";
+  });
 }
 
 function normalizeRole(role) {
@@ -297,8 +596,6 @@ function renderMobileNavigation(currentUser) {
 
   const visibleLinks = getVisibleNavigationLinks();
   const roleKey = getRoleKey(currentUser);
-  const currentLabel =
-    document.querySelector(".header-actions")?.dataset.baseLabel || "";
   const navLinksMarkup = visibleLinks
     .map(
       (link) => `
@@ -335,11 +632,6 @@ function renderMobileNavigation(currentUser) {
 
   mobileNav.innerHTML = `
     <div class="mobile-nav-shell">
-      ${
-        currentLabel
-          ? `<span class="pill-tag mobile-nav-status">${escapeHtml(currentLabel)}</span>`
-          : ""
-      }
       <div class="mobile-nav-links">
         ${navLinksMarkup}
       </div>
@@ -634,16 +926,8 @@ function renderHeaderActions(currentUser) {
   const roleKey = getRoleKey(currentUser);
 
   headerActions.forEach((slot) => {
-    if (!slot.dataset.baseLabel) {
-      const currentPill = slot.querySelector(".pill-tag");
-      slot.dataset.baseLabel = currentPill ? currentPill.textContent.trim() : BRAND_NAME;
-    }
-
-    const pill = `<span class="pill-tag">${slot.dataset.baseLabel}</span>`;
-
     if (!currentUser) {
       slot.innerHTML = `
-        ${pill}
         <div class="header-link-row">
           <a class="ghost-button" href="./login.html">Log in</a>
           <a class="cta-button" href="./signup.html">Sign up</a>
@@ -653,13 +937,12 @@ function renderHeaderActions(currentUser) {
     }
 
     slot.innerHTML = `
-      ${pill}
       <div class="header-link-row">
         <a class="ghost-button" href="${roleHomes[roleKey] || "./intelligence.html"}">Dashboard</a>
         <a class="ghost-button" href="./profile.html">Profile</a>
         <div class="user-badge">
-          <strong>${currentUser.name}</strong>
-          <span>${roleLabels[roleKey] || prettyLabel(currentUser.role)}</span>
+          <strong>${escapeHtml(currentUser.name || BRAND_NAME)}</strong>
+          <span>${escapeHtml(roleLabels[roleKey] || prettyLabel(currentUser.role))}</span>
         </div>
         <button class="soft-button" type="button" data-logout>Logout</button>
       </div>
@@ -2113,6 +2396,7 @@ async function initSignupPage(currentUser) {
 async function bootstrap() {
   initFadeIn();
   attachFlash();
+  initCityContext();
 
   const cachedUser = getStoredUser();
   renderHeaderActions(cachedUser);

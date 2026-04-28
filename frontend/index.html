@@ -6,7 +6,7 @@
     <title>HelpHive | Civic Intelligence Layer</title>
     <meta
       name="description"
-      content="HelpHive is a community support layer for ward insights, NGO coordination, volunteer matching, and real-time action across Pune."
+      content="HelpHive is a community support layer for ward insights, NGO coordination, volunteer matching, and real-time action across the selected city's wards."
     />
     <meta name="theme-color" content="#f4cba5" />
     <link
@@ -56,8 +56,10 @@
           <a href="./csr-dashboard.html" data-nav="csr_dashboard" data-role-tab="csr" hidden>CSR Dashboard</a>
         </nav>
         <div class="header-actions">
-          <span class="pill-tag">11 wards live</span>
-          <a class="soft-button ghost-button" href="./community.html">See field stories</a>
+          <div class="header-link-row">
+            <a class="ghost-button" href="./login.html">Log in</a>
+            <a class="cta-button" href="./signup.html">Sign up</a>
+          </div>
         </div>
       </header>
 
@@ -66,7 +68,19 @@
           <div class="hero-panel">
             <div class="hero-grid">
               <div class="hero-copy">
-                <span class="eyebrow">Civic layer for Pune wards</span>
+                <div class="hero-context-row">
+                  <span class="eyebrow">Civic layer for <span data-city-text="wardLabel">selected city wards</span></span>
+                  <div class="city-context-pill">
+                    <span data-city-context-label>Viewing selected city demo</span>
+                    <label class="visually-hidden" for="homeCitySelector">Choose demo city</label>
+                    <select id="homeCitySelector" data-city-selector aria-label="Select demo city">
+                      <option value="Pune">Pune</option>
+                      <option value="Mumbai">Mumbai</option>
+                      <option value="Delhi">Delhi</option>
+                      <option value="Bangalore">Bangalore</option>
+                    </select>
+                  </div>
+                </div>
                 <h1>Ward intelligence, layered like a city desk.</h1>
                 <p>
                   A shared civic layer that helps cities detect needs early and respond together.
@@ -95,7 +109,7 @@
                   <span class="severity-badge critical">Critical cluster</span>
                   <h3>Water alerts rising</h3>
                   <div class="card-meta">
-                    <span>Shivajinagar + Kasba</span>
+                    <span data-city-text="homeWaterCluster">Selected ward cluster</span>
                     <strong>+18%</strong>
                   </div>
                 </article>
@@ -104,7 +118,7 @@
                   <span class="severity-badge urgent">Urgent sanitation</span>
                   <h3>Sanitation gaps detected</h3>
                   <div class="card-meta">
-                    <span>Pimpri line sweep delayed</span>
+                    <span data-city-text="homeSanitationStatus">Selected city line sweep delayed</span>
                     <strong>09:10 AM</strong>
                   </div>
                 </article>
