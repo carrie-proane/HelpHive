@@ -17,7 +17,7 @@
     {
       "id": "user_admin",
       "name": "Asha Kulkarni",
-      "email": "admin@kindredpune.org",
+      "email": "admin@helphive.org",
       "passwordHash": "$2a$10$kgXYn.8UISVtlBQod1vOguQQ3BuxUO9FtJz2DGiRDqfY8VoH9rqOi",
       "role": "admin",
       "skills": [
@@ -49,7 +49,7 @@
     {
       "id": "user_ngo",
       "name": "Meera Patil",
-      "email": "ngo@kindredpune.org",
+      "email": "ngo@helphive.org",
       "passwordHash": "$2a$10$kgXYn.8UISVtlBQod1vOguQQ3BuxUO9FtJz2DGiRDqfY8VoH9rqOi",
       "role": "ngo_worker",
       "skills": [
@@ -80,7 +80,7 @@
     {
       "id": "user_volunteer_1",
       "name": "Aditya Kale",
-      "email": "volunteer@kindredpune.org",
+      "email": "volunteer@helphive.org",
       "passwordHash": "$2a$10$kgXYn.8UISVtlBQod1vOguQQ3BuxUO9FtJz2DGiRDqfY8VoH9rqOi",
       "role": "volunteer",
       "skills": [
@@ -112,7 +112,7 @@
     {
       "id": "user_volunteer_2",
       "name": "Fatima Shaikh",
-      "email": "buddy@kindredpune.org",
+      "email": "buddy@helphive.org",
       "passwordHash": "$2a$10$kgXYn.8UISVtlBQod1vOguQQ3BuxUO9FtJz2DGiRDqfY8VoH9rqOi",
       "role": "volunteer",
       "skills": [
@@ -144,7 +144,7 @@
     {
       "id": "user_csr",
       "name": "Rohan Deshpande",
-      "email": "csr@kindredpune.org",
+      "email": "csr@helphive.org",
       "passwordHash": "$2a$10$kgXYn.8UISVtlBQod1vOguQQ3BuxUO9FtJz2DGiRDqfY8VoH9rqOi",
       "role": "csr_partner",
       "skills": [
