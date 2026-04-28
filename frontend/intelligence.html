@@ -49,8 +49,10 @@
           <a href="./csr-dashboard.html" data-nav="csr_dashboard" data-role-tab="csr" hidden>CSR Dashboard</a>
         </nav>
         <div class="header-actions">
-          <span class="pill-tag">Live desk mode</span>
-          <a class="soft-button ghost-button" href="./join.html">Request access</a>
+          <div class="header-link-row">
+            <a class="ghost-button" href="./login.html">Log in</a>
+            <a class="cta-button" href="./signup.html">Sign up</a>
+          </div>
         </div>
       </header>
 
@@ -59,7 +61,23 @@
           <div class="page-hero-panel">
             <div class="page-hero-grid slim">
               <div class="page-hero-copy">
-                <span class="eyebrow">Operations intelligence</span>
+                <div class="hero-context-row">
+                  <span class="eyebrow">Operations intelligence</span>
+                  <div class="city-context-pill">
+                    <span data-city-context-label>Viewing selected city demo</span>
+                    <label class="visually-hidden" for="intelligenceCitySelector">Choose demo city</label>
+                    <select
+                      id="intelligenceCitySelector"
+                      data-city-selector
+                      aria-label="Select demo city"
+                    >
+                      <option value="Pune">Pune</option>
+                      <option value="Mumbai">Mumbai</option>
+                      <option value="Delhi">Delhi</option>
+                      <option value="Bangalore">Bangalore</option>
+                    </select>
+                  </div>
+                </div>
                 <h1>See where pressure is building before the city feels it.</h1>
                 <p>
                   HelpHive turns calls, field notes, NGO routing, and volunteer
@@ -119,7 +137,7 @@
             <div class="section-heading">
               <div>
                 <span class="eyebrow">Ward map</span>
-                <h2>Live overlays for Pune, tuned for action</h2>
+                <h2>Live overlays for <span data-city-text="wardLabel">selected city wards</span>, tuned for action</h2>
               </div>
               <p>
                 The map is the shared room. Severity blooms, NGO ownership, and
@@ -199,7 +217,7 @@
               <aside class="map-side">
                 <article class="dashboard-preview">
                   <span class="side-kicker">Drilldown</span>
-                  <h4>Shivajinagar ward card</h4>
+                  <h4 data-city-text="intelligenceDrilldownTitle">Selected city ward card</h4>
                   <ul id="intelDeskSummary">
                     <li>
                       <span>Open needs</span>
@@ -380,7 +398,7 @@
 
       <footer class="footer">
         <span>HelpHive intelligence view</span>
-        <span>Shared map, drilldowns, and routing for Pune wards</span>
+        <span>Shared map, drilldowns, and routing for <span data-city-text="wardLabel">selected city wards</span></span>
       </footer>
     </div>
 
