@@ -43,8 +43,10 @@
           <a href="./csr-dashboard.html" data-nav="csr_dashboard" data-role-tab="csr" hidden>CSR Dashboard</a>
         </nav>
         <div class="header-actions">
-          <span class="pill-tag">Open network</span>
-          <a class="soft-button ghost-button" href="./community.html">See field voices</a>
+          <div class="header-link-row">
+            <a class="ghost-button" href="./login.html">Log in</a>
+            <a class="cta-button" href="./signup.html">Sign up</a>
+          </div>
         </div>
       </header>
 
@@ -187,7 +189,12 @@
                   </label>
                   <label>
                     Area or ward
-                    <input type="text" name="baseLocation" placeholder="Kothrud, Shivajinagar, Pimpri..." />
+                    <input
+                      type="text"
+                      name="baseLocation"
+                      placeholder="Area, ward, neighborhood..."
+                      data-city-placeholder="baseLocationPlaceholder"
+                    />
                   </label>
                   <label>
                     Skills or strengths
@@ -262,10 +269,10 @@
                 </p>
               </article>
               <article class="faq-card">
-                <h3>Is this only for Pune?</h3>
-                <p class="muted">
-                  This launch concept is centered on Pune wards, with the design
-                  language shaped around its civic context.
+                <h3 data-city-text="faqCityQuestion">Can HelpHive work beyond this city?</h3>
+                <p class="muted" data-city-text="faqCityAnswer">
+                  Yes. The selected city is shown as the demo city, but HelpHive is
+                  designed for ward-level operations across Indian cities.
                 </p>
               </article>
             </div>

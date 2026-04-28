@@ -43,8 +43,10 @@
           <a href="./csr-dashboard.html" data-nav="csr_dashboard" data-role-tab="csr" hidden>CSR Dashboard</a>
         </nav>
         <div class="header-actions">
-          <span class="pill-tag">Join the network</span>
-          <a class="soft-button ghost-button" href="./login.html">Already have an account?</a>
+          <div class="header-link-row">
+            <a class="ghost-button" href="./login.html">Log in</a>
+            <a class="cta-button" href="./signup.html">Sign up</a>
+          </div>
         </div>
       </header>
 
@@ -81,7 +83,12 @@
               </label>
               <label>
                 Base location
-                <input type="text" name="baseLocation" placeholder="Kothrud, Shivajinagar, Pimpri..." />
+                <input
+                  type="text"
+                  name="baseLocation"
+                  placeholder="Area, ward, neighborhood..."
+                  data-city-placeholder="baseLocationPlaceholder"
+                />
               </label>
               <label>
                 Skills
