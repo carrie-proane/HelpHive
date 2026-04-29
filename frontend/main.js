@@ -710,6 +710,17 @@ function joinNameList(users = [], fallback = "Not assigned") {
   return names.length ? names.join(", ") : fallback;
 }
 
+function debounce(callback, wait = 140) {
+  let timeoutId = 0;
+
+  return (...args) => {
+    window.clearTimeout(timeoutId);
+    timeoutId = window.setTimeout(() => {
+      callback(...args);
+    }, wait);
+  };
+}
+
 function buildQueryString(values = {}) {
   const params = new URLSearchParams();
   Object.entries(values).forEach(([key, value]) => {
@@ -874,34 +885,247 @@ function initFadeIn() {
   });
 }
 
-function createMarker(issue) {
+const MOBILE_MAP_BREAKPOINT = 768;
+const MOBILE_MAP_MARKER_LIMIT = 10;
+const MOBILE_MAP_ALERT_LIMIT = 4;
+
+function isMobileMapViewport() {
+  return window.innerWidth < MOBILE_MAP_BREAKPOINT;
+}
+
+function closeMapBottomSheet() {
+  const sheet = document.getElementById("map-bottom-sheet");
+  const backdrop = document.getElementById("map-sheet-backdrop");
+
+  if (sheet) {
+    sheet.classList.add("hidden");
+    sheet.setAttribute("aria-hidden", "true");
+  }
+
+  if (backdrop) {
+    backdrop.classList.add("hidden");
+    backdrop.setAttribute("aria-hidden", "true");
+  }
+}
+
+function openMapBottomSheet(markup) {
+  const sheet = document.getElementById("map-bottom-sheet");
+  const backdrop = document.getElementById("map-sheet-backdrop");
+
+  if (!sheet) {
+    return;
+  }
+
+  const content = sheet.querySelector(".sheet-content");
+  if (content) {
+    content.innerHTML = markup;
+  }
+
+  sheet.scrollTop = 0;
+  sheet.classList.remove("hidden");
+  sheet.setAttribute("aria-hidden", "false");
+
+  if (backdrop) {
+    backdrop.classList.remove("hidden");
+    backdrop.setAttribute("aria-hidden", "false");
+  }
+}
+
+function renderMapSheetRows(rows = []) {
+  return rows
+    .filter((row) => row && row.value)
+    .map(
+      (row) => `
+        <div class="sheet-meta-row">
+          <span>${escapeHtml(row.label)}</span>
+          <strong>${escapeHtml(row.value)}</strong>
+        </div>
+      `
+    )
+    .join("");
+}
+
+function renderMapSheetNote(label, value) {
+  if (!value) {
+    return "";
+  }
+
+  return `<p class="sheet-note"><strong>${escapeHtml(label)}:</strong> ${escapeHtml(value)}</p>`;
+}
+
+function renderIssueSheet(issue) {
+  const severityLabel = capitalize(withFallback(issue.severity, "stable"));
+  const locationLabel = withFallback(issue.locationName, "Selected ward");
+  const ngoLabel = withFallback(issue.ngo, "NGO Desk");
+  const intensityLabel =
+    typeof issue.currentIntensity === "number" ? issue.currentIntensity.toFixed(2) : "0.00";
+  const signals = joinReadableList((issue.evidenceKeywords || []).map((value) => prettyLabel(value)), "");
+  const peopleMentionLabel =
+    issue.peopleMention && Number(issue.peopleMention) > 0
+      ? `${issue.peopleMention} people or households referenced`
+      : "";
+
+  return `
+    <div class="sheet-intro">
+      <span class="sheet-eyebrow">${escapeHtml(prettyLabel(withFallback(issue.type, "need")))}</span>
+      <h3>${escapeHtml(withFallback(issue.label, "Open need"))}</h3>
+      <p>${escapeHtml(`${locationLabel} is showing ${severityLabel} pressure with ${ngoLabel} assigned right now.`)}</p>
+    </div>
+    <div class="sheet-meta-list">
+      ${renderMapSheetRows([
+        { label: "Area", value: locationLabel },
+        { label: "Severity", value: severityLabel },
+        { label: "Status", value: "Open need" },
+        { label: "Last updated", value: withFallback(issue.updated, "Not specified") },
+        { label: "NGO desk", value: ngoLabel },
+        { label: "Heat intensity", value: intensityLabel }
+      ])}
+    </div>
+    ${renderMapSheetNote("Signals", signals)}
+    ${renderMapSheetNote("Mentions", peopleMentionLabel)}
+  `;
+}
+
+function renderAlertSheet(alert) {
+  const severityLabel = capitalize(withFallback(alert.severity, "urgent"));
+  const locationLabel = withFallback(alert.locationName, "Selected ward");
+  const evidenceItems = (alert.evidence || [])
+    .filter(Boolean)
+    .map((item) => `<li>${escapeHtml(item)}</li>`)
+    .join("");
+
+  return `
+    <div class="sheet-intro">
+      <span class="sheet-eyebrow">Cluster alert</span>
+      <h3>${escapeHtml(withFallback(alert.title, "Escalation cluster"))}</h3>
+      <p>${escapeHtml(withFallback(alert.explanation, `${locationLabel} has repeated reports that need attention.`))}</p>
+    </div>
+    <div class="sheet-meta-list">
+      ${renderMapSheetRows([
+        { label: "Area", value: locationLabel },
+        { label: "Severity", value: severityLabel },
+        { label: "Status", value: "Active cluster" },
+        { label: "Reports in cluster", value: String(withFallback(alert.evidenceCount, "0")) },
+        {
+          label: "Cluster strength",
+          value: typeof alert.weightedCount === "number" ? alert.weightedCount.toFixed(1) : "0.0"
+        }
+      ])}
+    </div>
+    ${evidenceItems ? `<ul class="sheet-bullet-list">${evidenceItems}</ul>` : ""}
+  `;
+}
+
+function focusMapPoint(map, latitude, longitude, preferredZoom = 13) {
+  if (!map || !isMobileMapViewport()) {
+    return;
+  }
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    return;
+  }
+
+  map.flyTo([latitude, longitude], Math.max(map.getZoom(), preferredZoom), {
+    animate: true,
+    duration: 0.35
+  });
+}
+
+function onMapPointClick(point) {
+  if (!isMobileMapViewport()) {
+    return;
+  }
+
+  if (!point) {
+    return;
+  }
+
+  openMapBottomSheet(point.kind === "alert" ? renderAlertSheet(point) : renderIssueSheet(point));
+}
+
+function createMarker(issue, map) {
   const severityColors = getSeverityColors();
   const color = severityColors[issue.severity] || severityColors.stable;
+  const isMobile = isMobileMapViewport();
+  const markerSize = isMobile ? 36 : 24;
+  const markerAnchor = markerSize / 2;
+  const haloSize = isMobile ? 18 : 14;
   const icon = L.divIcon({
     className: "",
     html:
       '<div class="issue-marker" style="color:' +
       color +
-      "; box-shadow: 0 0 0 14px " +
+      "; box-shadow: 0 0 0 " +
+      haloSize +
+      "px " +
       hexToRgba(color, 0.18) +
       ';"></div>',
-    iconSize: [24, 24],
-    iconAnchor: [12, 12]
+    iconSize: [markerSize, markerSize],
+    iconAnchor: [markerAnchor, markerAnchor]
   });
 
   const popup = `
     <div class="popup-card">
-      <h4>${issue.label}</h4>
-      <div class="popup-line"><span>Severity</span><strong>${capitalize(issue.severity)}</strong></div>
-      <div class="popup-line"><span>Last updated</span><strong>${issue.updated}</strong></div>
-      <div class="popup-line"><span>Assigned NGO</span><strong>${issue.ngo}</strong></div>
-      <div class="popup-line"><span>Intensity</span><strong>${issue.currentIntensity}</strong></div>
+      <h4>${escapeHtml(withFallback(issue.label, "Open need"))}</h4>
+      <div class="popup-line"><span>Severity</span><strong>${escapeHtml(capitalize(withFallback(issue.severity, "stable")))}</strong></div>
+      <div class="popup-line"><span>Last updated</span><strong>${escapeHtml(withFallback(issue.updated, "Not specified"))}</strong></div>
+      <div class="popup-line"><span>Assigned NGO</span><strong>${escapeHtml(withFallback(issue.ngo, "NGO Desk"))}</strong></div>
+      <div class="popup-line"><span>Intensity</span><strong>${escapeHtml(String(issue.currentIntensity ?? "0.00"))}</strong></div>
     </div>
   `;
 
-  return L.marker([issue.lat, issue.lng], { icon }).bindPopup(popup, {
+  const marker = L.marker([issue.lat, issue.lng], { icon });
+
+  marker.on("click", (event) => {
+    if (event?.originalEvent) {
+      L.DomEvent.stop(event.originalEvent);
+    }
+
+    if (!isMobileMapViewport()) {
+      return;
+    }
+
+    focusMapPoint(map, issue.lat, issue.lng);
+    onMapPointClick({ ...issue, kind: "issue" });
+  });
+
+  if (isMobile) {
+    return marker;
+  }
+
+  return marker.bindPopup(popup, {
     className: "custom-popup"
   });
+}
+
+function createAlertClusterMarker(alert, map) {
+  const severityColors = getSeverityColors();
+  const color = severityColors[alert.severity] || severityColors.urgent;
+  const markerSize = isMobileMapViewport() ? 36 : 30;
+  const markerAnchor = markerSize / 2;
+  const count = alert.evidenceCount > 9 ? "9+" : String(alert.evidenceCount || 1);
+  const icon = L.divIcon({
+    className: "",
+    html: `<div class="cluster-marker" style="--cluster-color: ${color};"><span>${escapeHtml(count)}</span></div>`,
+    iconSize: [markerSize, markerSize],
+    iconAnchor: [markerAnchor, markerAnchor]
+  });
+
+  const marker = L.marker([alert.latitude, alert.longitude], {
+    icon,
+    zIndexOffset: 420
+  });
+
+  marker.on("click", (event) => {
+    if (event?.originalEvent) {
+      L.DomEvent.stop(event.originalEvent);
+    }
+
+    focusMapPoint(map, alert.latitude, alert.longitude);
+    onMapPointClick({ ...alert, kind: "alert" });
+  });
+
+  return marker;
 }
 
 async function resolveCurrentUser() {
@@ -1345,30 +1569,42 @@ async function setupMap(mapElementId, filterPrefix = "") {
 
   function drawLayers() {
     const severityColors = getSeverityColors();
+    const isMobile = isMobileMapViewport();
     markerLayer.clearLayers();
     heatLayer.clearLayers();
 
     const visibleIssues = filteredIssues();
+    const prioritizedIssues = isMobile
+      ? [...visibleIssues]
+          .sort((left, right) => (right.heatWeight || 0) - (left.heatWeight || 0))
+          .slice(0, MOBILE_MAP_MARKER_LIMIT)
+      : visibleIssues;
+    const visibleAlerts = isMobile
+      ? [...alerts]
+          .sort((left, right) => (right.weightedCount || 0) - (left.weightedCount || 0))
+          .slice(0, MOBILE_MAP_ALERT_LIMIT)
+      : alerts;
 
-    visibleIssues.forEach((issue) => {
+    prioritizedIssues.forEach((issue) => {
       const ageHours = formatAgeHours(issue.updated_at);
       const decay = issue.heatWeight || Math.exp(-0.12 * ageHours);
       const color = severityColors[issue.severity] || severityColors.stable;
+      const radiusMultiplier = isMobile ? 0.82 : 1;
       const severityRadius =
-        issue.severity === "critical" ? 2200 : issue.severity === "urgent" ? 1600 : 1100;
-      const intensity = Math.max(decay, 0.15);
-      const outerRadius = severityRadius + intensity * 900;
-      const innerRadius = severityRadius * 0.45 + intensity * 420;
+        (issue.severity === "critical" ? 2200 : issue.severity === "urgent" ? 1600 : 1100) * radiusMultiplier;
+      const intensity = Math.max(decay, isMobile ? 0.22 : 0.15);
+      const outerRadius = severityRadius + intensity * (isMobile ? 520 : 900) * radiusMultiplier;
+      const innerRadius = severityRadius * 0.45 + intensity * (isMobile ? 260 : 420) * radiusMultiplier;
       issue.currentIntensity = Number(intensity.toFixed(2));
 
-      createMarker(issue).addTo(markerLayer);
+      createMarker(issue, map).addTo(markerLayer);
 
       L.circle([issue.lat, issue.lng], {
         radius: outerRadius,
         color,
         weight: 1,
         fillColor: color,
-        fillOpacity: Math.min(0.06 + intensity * 0.28, 0.34)
+        fillOpacity: Math.min((isMobile ? 0.04 : 0.06) + intensity * (isMobile ? 0.18 : 0.28), isMobile ? 0.22 : 0.34)
       }).addTo(heatLayer);
 
       L.circle([issue.lat, issue.lng], {
@@ -1376,25 +1612,38 @@ async function setupMap(mapElementId, filterPrefix = "") {
         color,
         weight: 0,
         fillColor: color,
-        fillOpacity: Math.min(0.14 + intensity * 0.3, 0.42)
+        fillOpacity: Math.min((isMobile ? 0.1 : 0.14) + intensity * (isMobile ? 0.2 : 0.3), isMobile ? 0.28 : 0.42)
       }).addTo(heatLayer);
     });
 
-    alerts.forEach((alert) => {
-      L.circle([alert.latitude, alert.longitude], {
-        radius: 2200,
+    visibleAlerts.forEach((alert) => {
+      const alertCircle = L.circle([alert.latitude, alert.longitude], {
+        radius: isMobile ? 1700 : 2200,
         color: severityColors[alert.severity] || severityColors.urgent,
         weight: 2,
         dashArray: "8 6",
-        fillOpacity: 0.02
+        fillOpacity: isMobile ? 0.01 : 0.02
       }).addTo(heatLayer);
+
+      if (isMobile) {
+        alertCircle.on("click", (event) => {
+          if (event?.originalEvent) {
+            L.DomEvent.stop(event.originalEvent);
+          }
+
+          focusMapPoint(map, alert.latitude, alert.longitude);
+          onMapPointClick({ ...alert, kind: "alert" });
+        });
+
+        createAlertClusterMarker(alert, map).addTo(markerLayer);
+      }
     });
 
-    const highest = [...visibleIssues].sort(
+    const highest = [...prioritizedIssues].sort(
       (a, b) => (b.currentIntensity || 0) - (a.currentIntensity || 0)
     )[0];
 
-    if (highest) {
+    if (highest && !isMobile) {
       L.marker([highest.lat, highest.lng], {
         icon: L.divIcon({
           className: "heat-label",
@@ -1422,9 +1671,77 @@ async function setupMap(mapElementId, filterPrefix = "") {
   ["typeFilter", "severityFilter", "ngoFilter"].forEach((fieldId) => {
     const field = getField(fieldId);
     if (field) {
-      field.addEventListener("change", drawLayers);
+      field.addEventListener("change", () => {
+        if (fieldId === "typeFilter" && mapElementId === "intelligence-map") {
+          document.querySelectorAll(".quick-filter-btn").forEach((button) => {
+            button.classList.toggle("is-active", button.dataset.quickFilter === field.value);
+          });
+        }
+
+        closeMapBottomSheet();
+        drawLayers();
+      });
     }
   });
+
+  if (mapElementId === "intelligence-map") {
+    const quickFilterRow = document.getElementById("mapQuickFilters");
+    if (quickFilterRow && quickFilterRow.dataset.bound !== "true") {
+      quickFilterRow.dataset.bound = "true";
+      const quickFilters = quickFilterRow.querySelectorAll(".quick-filter-btn");
+
+      quickFilters.forEach((button) => {
+        button.addEventListener("click", () => {
+          quickFilters.forEach((item) => item.classList.remove("is-active"));
+          button.classList.add("is-active");
+
+          const filterValue = button.dataset.quickFilter || "all";
+          const typeSelect = getField("typeFilter");
+          if (typeSelect) {
+            typeSelect.value = filterValue;
+          }
+
+          closeMapBottomSheet();
+          drawLayers();
+        });
+      });
+    }
+
+    const sheet = document.getElementById("map-bottom-sheet");
+    if (sheet && sheet.dataset.bound !== "true") {
+      sheet.dataset.bound = "true";
+
+      sheet.querySelector(".sheet-handle")?.addEventListener("click", closeMapBottomSheet);
+      sheet.querySelector(".sheet-close")?.addEventListener("click", closeMapBottomSheet);
+      document.getElementById("map-sheet-backdrop")?.addEventListener("click", closeMapBottomSheet);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") {
+          closeMapBottomSheet();
+        }
+      });
+    }
+  }
+
+  if (mapElement.dataset.mobileMapBound !== "true") {
+    mapElement.dataset.mobileMapBound = "true";
+
+    map.on("click", () => {
+      if (isMobileMapViewport()) {
+        closeMapBottomSheet();
+      }
+    });
+
+    const handleResponsiveMapRefresh = debounce(() => {
+      closeMapBottomSheet();
+      drawLayers();
+      window.requestAnimationFrame(() => {
+        map.invalidateSize();
+      });
+    }, 150);
+
+    window.addEventListener("resize", handleResponsiveMapRefresh);
+    window.addEventListener("orientationchange", handleResponsiveMapRefresh);
+  }
 
   initSignalFilterPanel(mapElementId, map);
   await refreshData();

@@ -145,6 +145,13 @@
               </p>
             </div>
 
+            <div class="map-quick-filters" id="mapQuickFilters">
+              <button class="quick-filter-btn is-active" data-quick-filter="all">All</button>
+              <button class="quick-filter-btn" data-quick-filter="water">Water</button>
+              <button class="quick-filter-btn" data-quick-filter="sanitation">Sanitation</button>
+              <button class="quick-filter-btn" data-quick-filter="volunteer">Volunteer</button>
+            </div>
+
             <div class="map-layout">
               <div class="map-board">
                 <div class="map-toolbar">
@@ -421,6 +428,17 @@
         </button>
         <div id="taskDetailContent"></div>
       </article>
+    </div>
+
+    <div id="map-sheet-backdrop" class="map-sheet-backdrop hidden" aria-hidden="true"></div>
+
+    <div id="map-bottom-sheet" class="map-sheet hidden" aria-hidden="true">
+      <button class="sheet-handle" type="button" aria-label="Close map details"></button>
+      <div class="sheet-header">
+        <p class="sheet-kicker">Map details</p>
+        <button class="sheet-close" type="button" aria-label="Close map details">Close</button>
+      </div>
+      <div class="sheet-content"></div>
     </div>
 
     <script
