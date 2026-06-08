@@ -2522,6 +2522,10 @@ async function createReviewIfNeeded({
   taskId,
   source,
   rawText,
+  rawExtractedText = "",
+  cleanedContent = "",
+  formattedContent = "",
+  hasTable = false,
   confidence,
   suggestedType,
   suggestedSeverity,
@@ -2557,6 +2561,10 @@ async function createReviewIfNeeded({
       languages: uniqueValues(normalizeArray(languages)),
       imageUrl: imageUrl || null,
       imageUrls: uniqueValues(normalizeArray(imageUrls)),
+      rawExtractedText: String(rawExtractedText || "").trim(),
+      cleaned_content: String(cleanedContent || "").trim(),
+      formattedContent: String(formattedContent || rawText || "").trim(),
+      hasTable: Boolean(hasTable),
       trainingStatus: "pending_annotation"
     }
   });
@@ -2710,8 +2718,16 @@ async function buildReviewQueue() {
       locationName: review.task.locationName,
       confidence: Number(review.confidence),
       rawText: review.rawText || "",
+      rawExtractedText: review.correctedPayload?.rawExtractedText || "",
+      cleanedContent: review.correctedPayload?.cleaned_content || "",
+      formattedContent:
+        review.correctedPayload?.formattedContent ||
+        review.rawText ||
+        review.task.description,
+      hasTable: Boolean(review.correctedPayload?.hasTable),
       correctedText:
         review.correctedPayload?.correctedText ||
+        review.correctedPayload?.cleaned_content ||
         review.correctedPayload?.description ||
         review.task.description,
       flaggedWords: review.correctedPayload?.flaggedWords || [],
@@ -3069,6 +3085,35 @@ async function runGeminiStructuredExtraction(filePath, mimeType, prompt, model =
   return parseModelJson(response.text || "", {});
 }
 
+async function runGeminiPlainText(prompt, model = GEMINI_MULTIMODAL_MODEL) {
+  if (!geminiClient) {
+    return "";
+  }
+
+  const response = await geminiClient.models.generateContent({
+    model,
+    contents: createUserContent([prompt])
+  });
+
+  return stripMarkdownCodeFence(response.text || "").trim();
+}
+
+async function reconstructLowConfidenceSurveyText(rawText = "", confidence = 1) {
+  const normalizedRawText = String(rawText || "").trim();
+  if (!normalizedRawText || clampConfidence(confidence, 1) >= 0.6 || !geminiClient) {
+    return "";
+  }
+
+  try {
+    return await runGeminiPlainText(
+      `The following text was extracted by OCR from a handwritten community survey form and contains many errors. Please reconstruct the most likely intended text based on context. The form is likely about community needs, flood relief, health, education, or livelihood in rural India. Preserve any names, numbers, locations, and rupee amounts as best as possible. Return only the cleaned reconstructed text, nothing else. Raw OCR text: ${normalizedRawText}`
+    );
+  } catch (error) {
+    console.warn(`Low-confidence OCR cleanup skipped: ${error.message}`);
+    return "";
+  }
+}
+
 async function runTesseractOCR(filePath) {
   const languages = uniqueValues([OCR_LANGUAGES, "eng+hin", "eng"]);
   let lastError = null;
@@ -3089,9 +3134,11 @@ async function runTesseractOCR(filePath) {
         .map((word) => word.text);
       const averageConfidence = clampConfidence((result?.data?.confidence || 0) / 100, 0);
       const text = result?.data?.text?.trim() || "";
+      const cleanedContent = await reconstructLowConfidenceSurveyText(text, averageConfidence);
 
       return {
         text,
+        cleanedContent,
         averageConfidence,
         provider: "Tesseract",
         model: `tesseract:${language}`,
@@ -3161,6 +3208,53 @@ async function runGeminiSurveyOCR(filePath, mimeType = "") {
   };
 }
 
+function normalizeSurveyTableFormattingResult(parsed, rawText = "") {
+  const normalizedRawText = String(rawText || "").trim();
+  const hasTable =
+    typeof parsed?.hasTable === "string"
+      ? parsed.hasTable.trim().toLowerCase() === "true"
+      : Boolean(parsed?.hasTable);
+  const formattedContent = String(parsed?.formattedContent || "").trim();
+
+  if (hasTable && formattedContent) {
+    return {
+      hasTable: true,
+      formattedContent
+    };
+  }
+
+  return {
+    hasTable: false,
+    formattedContent: normalizedRawText
+  };
+}
+
+async function formatSurveyTableContent(filePath, mimeType = "", rawText = "") {
+  const normalizedRawText = String(rawText || "").trim();
+  if (!normalizedRawText || !geminiClient) {
+    return {
+      hasTable: false,
+      formattedContent: normalizedRawText
+    };
+  }
+
+  try {
+    const parsed = await runGeminiStructuredExtraction(
+      filePath,
+      inferImageMimeType(filePath, mimeType),
+      `This is OCR-extracted text from a handwritten Hindi survey form that may contain a table. Raw text: ${normalizedRawText}. Look at both the raw text and the image carefully. If this content contains a tabular structure with rows and columns, reconstruct it as a clean Markdown table preserving all Hindi text exactly as written. If it does not contain a table, return the text as-is. Return only a JSON object with fields: hasTable (boolean) and formattedContent (string).`
+    );
+
+    return normalizeSurveyTableFormattingResult(parsed, normalizedRawText);
+  } catch (error) {
+    console.warn(`Survey table formatting skipped: ${error.message}`);
+    return {
+      hasTable: false,
+      formattedContent: normalizedRawText
+    };
+  }
+}
+
 function mergeExtractionSignals(primary = {}, secondary = {}) {
   return {
     type: primary.type || secondary.type,
@@ -3214,9 +3308,19 @@ async function runOCR(filePath, mimeType = "") {
     successes.reduce((sum, entry) => sum + Number(entry.averageConfidence || 0), 0) / successes.length,
     primary.averageConfidence
   );
+  const tableFormatting = await formatSurveyTableContent(
+    filePath,
+    mimeType,
+    primary.text
+  );
+  const cleanedContent = String(primary.cleanedContent || secondary.cleanedContent || "").trim();
 
   return {
-    text: primary.text,
+    text: tableFormatting.formattedContent || primary.text,
+    rawText: primary.text,
+    cleanedContent,
+    hasTable: tableFormatting.hasTable,
+    formattedContent: tableFormatting.formattedContent || primary.text,
     averageConfidence: Number(averageConfidence.toFixed(2)),
     provider:
       successes.length > 1
@@ -3952,14 +4056,16 @@ app.post(
 
         try {
           const ocr = await runOCR(file.path, file.mimetype || "");
-          const parsed = extractNeedSignals(ocr.text, ocr.structuredExtraction || {});
+          const routingText = ocr.rawText || ocr.text || "";
+          const displayText = ocr.formattedContent || ocr.text || routingText;
+          const parsed = extractNeedSignals(routingText, ocr.structuredExtraction || {});
           const needsReview = shouldRequireReview(ocr.averageConfidence, ocr.lowConfidenceWords);
           const task = await createTaskRecord({
             ngoUserId: request.user.id,
             source: "ocr",
             status: needsReview ? TASK_STATUS.PENDING_REVIEW : TASK_STATUS.OPEN,
-            description: ocr.text || "OCR survey intake",
-            extractedText: ocr.text,
+            description: displayText || "OCR survey intake",
+            extractedText: displayText,
             title: parsed.title,
             type: parsed.type,
             severity: parsed.severity,
@@ -3980,7 +4086,11 @@ app.post(
           const review = await createReviewIfNeeded({
             taskId: task.id,
             source: "ocr",
-            rawText: ocr.text,
+            rawText: displayText,
+            rawExtractedText: routingText,
+            cleanedContent: ocr.cleanedContent,
+            formattedContent: displayText,
+            hasTable: ocr.hasTable,
             confidence: ocr.averageConfidence,
             suggestedType: parsed.type,
             suggestedSeverity: parsed.severity,
