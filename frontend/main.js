@@ -66,7 +66,7 @@ const pageNavKeys = {
   "/report.html": "field_desk"
 };
 
-const API_URL = "https://backend-service-321419338933.us-central1.run.app";
+const API_URL = "http://localhost:3000";
 const DEMO_LOCATION_STORAGE_KEY = "helpHiveDemoLocation";
 const LEGACY_LOCATION_STORAGE_KEY = "location";
 const DEFAULT_DEMO_LOCATION = {

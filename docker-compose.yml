@@ -19,6 +19,8 @@ services:
 
   backend:
     build: ./backend
+    env_file:
+      - .env
     ports:
       - "3000:8080"
     environment:
@@ -30,6 +32,8 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/usr/src/app
+      - /usr/src/app/node_modules
+      - ./frontend:/usr/src/frontend
 
 volumes:
   postgres_data:
