@@ -44,12 +44,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   xdg-utils \
   && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /usr/src/app
+WORKDIR /usr/src/app/backend
 
-COPY package*.json ./
+COPY backend/package*.json ./
 RUN npm install --omit=dev --no-audit --no-fund
 
-COPY . .
+COPY backend/. ./
+COPY frontend ../frontend
 
 EXPOSE 8080
 

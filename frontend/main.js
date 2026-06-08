@@ -66,7 +66,7 @@ const pageNavKeys = {
   "/report.html": "field_desk"
 };
 
-const API_URL = "https://backend-service-321419338933.us-central1.run.app";
+const API_URL = "http://localhost:3000";
 const DEMO_LOCATION_STORAGE_KEY = "helpHiveDemoLocation";
 const LEGACY_LOCATION_STORAGE_KEY = "location";
 const DEFAULT_DEMO_LOCATION = {
@@ -698,6 +698,150 @@ function formatRelativeAge(value) {
 function joinReadableList(values = [], fallback = "Not specified") {
   const list = (values || []).map((value) => String(value || "").trim()).filter(Boolean);
   return list.length ? list.join(", ") : fallback;
+}
+
+function formatConfidence(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric.toFixed(2) : "N/A";
+}
+
+function createFileSelectionKey(file) {
+  return [file?.name || "", file?.size || 0, file?.lastModified || 0].join(":");
+}
+
+function buildReviewImageGalleryMarkup(item = {}) {
+  const imageUrls = Array.isArray(item.imageUrls) ? item.imageUrls.filter(Boolean) : [];
+  const normalizedUrls = [...new Set([item.imageUrl, ...imageUrls].filter(Boolean))];
+
+  if (!normalizedUrls.length) {
+    return "";
+  }
+
+  return `
+    <div class="review-image-gallery" aria-label="Survey image gallery">
+      ${normalizedUrls
+        .map(
+          (url, index) => `
+            <figure class="review-image-frame">
+              <img
+                src="${escapeHtml(url)}"
+                alt="${escapeHtml(`${item.title || "Survey"} image ${index + 1}`)}"
+                loading="lazy"
+              />
+              <figcaption>${escapeHtml(
+                normalizedUrls.length > 1 ? `Survey image ${index + 1}` : "Survey image"
+              )}</figcaption>
+            </figure>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function buildOcrBatchSummaryMarkup(summary = {}) {
+  const submittedCount = Number(summary.submittedCount || 0);
+  const processedCount = Number(summary.processedCount || 0);
+  const passedCount = Number(summary.passedCount || 0);
+  const flaggedCount = Number(summary.flaggedCount || 0);
+  const failedCount = Number(summary.failedCount || 0);
+
+  return `
+    <div class="ocr-summary-grid">
+      <article class="ocr-summary-card">
+        <span>Submitted</span>
+        <strong>${escapeHtml(submittedCount)}</strong>
+      </article>
+      <article class="ocr-summary-card">
+        <span>Processed</span>
+        <strong>${escapeHtml(processedCount)}</strong>
+      </article>
+      <article class="ocr-summary-card">
+        <span>Passed</span>
+        <strong>${escapeHtml(passedCount)}</strong>
+      </article>
+      <article class="ocr-summary-card">
+        <span>Flagged</span>
+        <strong>${escapeHtml(flaggedCount)}</strong>
+      </article>
+      ${
+        failedCount
+          ? `
+            <article class="ocr-summary-card">
+              <span>Failed</span>
+              <strong>${escapeHtml(failedCount)}</strong>
+            </article>
+          `
+          : ""
+      }
+    </div>
+  `;
+}
+
+function buildOcrBatchResultMarkup(payload = {}) {
+  const results = Array.isArray(payload.results) ? payload.results : [];
+
+  if (!results.length) {
+    return `
+      <strong>OCR summary</strong>
+      ${buildOcrBatchSummaryMarkup(payload.summary)}
+      <p class="helper-copy">No survey images could be processed from this upload.</p>
+    `;
+  }
+
+  return `
+    <strong>OCR batch summary</strong>
+    ${buildOcrBatchSummaryMarkup(payload.summary)}
+    <div class="ocr-result-stack">
+      ${results
+        .map((entry) => {
+          const statusLabel = entry.error
+            ? "Processing failed"
+            : entry.need?.needsReview
+              ? "Flagged for admin review"
+              : "Captured cleanly";
+          const previewMarkup = entry.imageUrl
+            ? `
+              <figure class="ocr-result-image-frame">
+                <img src="${escapeHtml(entry.imageUrl)}" alt="${escapeHtml(entry.filename || "Survey image")}" loading="lazy" />
+              </figure>
+            `
+            : "";
+
+          return `
+            <article class="ocr-result-card ${entry.error ? "has-error" : ""}">
+              ${previewMarkup}
+              <div class="ocr-result-copy">
+                <div class="ocr-result-header">
+                  <h4>${escapeHtml(entry.filename || "Survey image")}</h4>
+                  <span class="pill-tag">${escapeHtml(statusLabel)}</span>
+                </div>
+                ${
+                  entry.error
+                    ? `<p class="helper-copy">${escapeHtml(entry.error)}</p>`
+                    : `
+                      <p class="helper-copy">
+                        Provider: ${escapeHtml(entry.ocr?.provider || "OCR pipeline")}
+                        · Confidence: ${escapeHtml(formatConfidence(entry.ocr?.averageConfidence))}
+                      </p>
+                      <p class="helper-copy">
+                        Languages: ${escapeHtml(joinReadableList(entry.ocr?.languagesDetected || [], "Unspecified"))}
+                      </p>
+                      <pre>${escapeHtml(entry.ocr?.text || "")}</pre>
+                      ${
+                        entry.ocr?.lowConfidenceWords?.length
+                          ? `<p class="helper-copy">Flagged words: ${escapeHtml(entry.ocr.lowConfidenceWords.join(", "))}</p>`
+                          : ""
+                      }
+                    `
+                }
+              </div>
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
 }
 
 function joinPrettyList(values = [], fallback = "Not specified") {
@@ -2283,22 +2427,29 @@ async function initAdminPage() {
           ? reviewData.items
               .map(
                 (item) => `
-                  <article class="task-card">
-                    <span class="severity-badge ${item.severity}">${capitalize(item.severity)}</span>
-                    <h3>${item.title}</h3>
-                    <p class="helper-copy">Source: ${item.source} · Confidence: ${item.confidence}</p>
-                    <form class="stack-form queue-editor" data-review-form data-need-id="${item.id}">
+                  <article class="task-card" data-review-card data-review-id="${escapeHtml(item.id)}">
+                    <span class="severity-badge ${escapeHtml(item.severity || "stable")}">${escapeHtml(
+                      capitalize(item.severity || "stable")
+                    )}</span>
+                    <h3>${escapeHtml(item.title || "Untitled need")}</h3>
+                    <p class="helper-copy">Source: ${escapeHtml(item.source || "ocr")} · Confidence: ${escapeHtml(
+                      formatConfidence(item.confidence)
+                    )}</p>
+                    ${buildReviewImageGalleryMarkup(item)}
+                    <form class="stack-form queue-editor" data-review-form data-need-id="${escapeHtml(item.id)}">
                       <label>
                         Title
-                        <input name="title" value="${item.title}" />
+                        <input name="title" value="${escapeHtml(item.title || "")}" />
                       </label>
                       <label>
                         Description
-                        <textarea name="description">${item.description}</textarea>
+                        <textarea name="description">${escapeHtml(item.description || "")}</textarea>
                       </label>
                       <label>
                         Corrected text
-                        <textarea name="correctedText">${item.correctedText || item.rawText || item.description}</textarea>
+                        <textarea name="correctedText">${escapeHtml(
+                          item.correctedText || item.rawText || item.description || ""
+                        )}</textarea>
                       </label>
                       <label>
                         Severity
@@ -2310,19 +2461,29 @@ async function initAdminPage() {
                       </label>
                       <label>
                         Location
-                        <input name="locationName" value="${item.locationName}" />
+                        <input name="locationName" value="${escapeHtml(item.locationName || "")}" />
                       </label>
                       ${
                         item.flaggedWords?.length
-                          ? `<p class="helper-copy">Flagged terms: ${item.flaggedWords.join(", ")}</p>`
+                          ? `<p class="helper-copy">Flagged terms: ${escapeHtml(item.flaggedWords.join(", "))}</p>`
                           : ""
                       }
                       ${
                         item.evidence?.length
-                          ? `<p class="helper-copy">Evidence: ${item.evidence.join(" · ")}</p>`
+                          ? `<p class="helper-copy">Evidence: ${escapeHtml(item.evidence.join(" · "))}</p>`
                           : ""
                       }
-                      <button class="cta-button" type="submit">Approve and update</button>
+                      <div class="review-card-actions">
+                        <button class="cta-button" type="submit">Approve and update</button>
+                        <button class="danger-button" type="button" data-review-reject-toggle>Reject</button>
+                      </div>
+                      <div class="review-reject-confirm hidden" data-reject-confirm>
+                        <p class="helper-copy">Are you sure you want to reject this task?</p>
+                        <div class="review-card-actions">
+                          <button class="danger-button" type="button" data-review-reject-confirm>Confirm reject</button>
+                          <button class="ghost-button" type="button" data-review-reject-cancel>Cancel</button>
+                        </div>
+                      </div>
                     </form>
                   </article>
                 `
@@ -2409,6 +2570,69 @@ async function initAdminPage() {
     }
   });
 
+  document.addEventListener("click", async (event) => {
+    const toggleButton = event.target.closest("[data-review-reject-toggle]");
+    if (toggleButton) {
+      const card = toggleButton.closest("[data-review-card]");
+      const confirmPanel = card?.querySelector("[data-reject-confirm]");
+      if (!card || !confirmPanel) {
+        return;
+      }
+
+      reviewQueue?.querySelectorAll("[data-reject-confirm]").forEach((panel) => {
+        if (panel !== confirmPanel) {
+          panel.classList.add("hidden");
+        }
+      });
+      confirmPanel.classList.toggle("hidden");
+      return;
+    }
+
+    const cancelButton = event.target.closest("[data-review-reject-cancel]");
+    if (cancelButton) {
+      const confirmPanel = cancelButton.closest("[data-reject-confirm]");
+      if (confirmPanel) {
+        confirmPanel.classList.add("hidden");
+      }
+      return;
+    }
+
+    const confirmButton = event.target.closest("[data-review-reject-confirm]");
+    if (!confirmButton) {
+      return;
+    }
+
+    const card = confirmButton.closest("[data-review-card]");
+    const reviewId = card?.dataset.reviewId;
+    if (!card || !reviewId) {
+      return;
+    }
+
+    const existingError = card.querySelector("[data-review-error]");
+    if (existingError) {
+      existingError.remove();
+    }
+
+    try {
+      confirmButton.setAttribute("disabled", "true");
+      await apiFetch(`/api/needs/${reviewId}/reject`, {
+        method: "PUT"
+      });
+      card.remove();
+      if (reviewQueue && !reviewQueue.querySelector("[data-review-card]")) {
+        reviewQueue.innerHTML = renderEmptyState("No items pending review.");
+      }
+      showGlobalBanner("Review item rejected.", "info");
+    } catch (error) {
+      confirmButton.removeAttribute("disabled");
+      const errorMessage = document.createElement("p");
+      errorMessage.className = "helper-copy";
+      errorMessage.dataset.reviewError = "true";
+      errorMessage.textContent = error.message || "Could not reject the review item.";
+      confirmButton.closest("[data-reject-confirm]")?.append(errorMessage);
+    }
+  });
+
   await refreshAdmin();
 }
 
@@ -2416,6 +2640,8 @@ async function initReportPage() {
   const ocrForm = document.getElementById("ocrUploadForm");
   const audioForm = document.getElementById("audioUploadForm");
   const manualForm = document.getElementById("manualNeedForm");
+  const ocrFileInput = ocrForm?.querySelector('input[name="image"]');
+  const ocrImagePreview = document.getElementById("ocrImagePreview");
   const recorderButton = document.getElementById("voiceRecorderButton");
   const voicePreview = document.getElementById("voicePreview");
   const ocrResult = document.getElementById("ocrResult");
@@ -2424,15 +2650,134 @@ async function initReportPage() {
   let mediaRecorder = null;
   let recordedAudioBlob = null;
   let recordedChunks = [];
+  let selectedSurveyFiles = [];
+  const surveyPreviewUrls = new Map();
 
   if (!ocrForm && !audioForm && !manualForm) {
     return;
   }
 
+  function syncSelectedSurveyFiles() {
+    if (!ocrFileInput) {
+      return;
+    }
+
+    if (typeof DataTransfer === "undefined") {
+      return;
+    }
+
+    const transfer = new DataTransfer();
+    selectedSurveyFiles.forEach((file) => transfer.items.add(file));
+    ocrFileInput.files = transfer.files;
+    ocrFileInput.required = selectedSurveyFiles.length === 0;
+  }
+
+  function releaseSurveyPreview(file) {
+    const key = createFileSelectionKey(file);
+    const previewUrl = surveyPreviewUrls.get(key);
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl);
+      surveyPreviewUrls.delete(key);
+    }
+  }
+
+  function resetSurveySelection() {
+    selectedSurveyFiles.forEach((file) => releaseSurveyPreview(file));
+    selectedSurveyFiles = [];
+    if (ocrFileInput) {
+      ocrFileInput.value = "";
+    }
+    syncSelectedSurveyFiles();
+    renderSelectedSurveyFiles();
+  }
+
+  function renderSelectedSurveyFiles() {
+    if (!ocrImagePreview) {
+      return;
+    }
+
+    if (!selectedSurveyFiles.length) {
+      ocrImagePreview.innerHTML = "";
+      return;
+    }
+
+    ocrImagePreview.innerHTML = selectedSurveyFiles
+      .map((file, index) => {
+        const key = createFileSelectionKey(file);
+        let previewUrl = surveyPreviewUrls.get(key);
+        if (!previewUrl) {
+          previewUrl = URL.createObjectURL(file);
+          surveyPreviewUrls.set(key, previewUrl);
+        }
+
+        return `
+          <article class="image-preview-card">
+            <img src="${escapeHtml(previewUrl)}" alt="${escapeHtml(file.name || `Survey image ${index + 1}`)}" />
+            <div class="image-preview-copy">
+              <strong>${escapeHtml(file.name || `Survey image ${index + 1}`)}</strong>
+              <button
+                class="ghost-button image-preview-remove"
+                type="button"
+                data-remove-survey-image="${escapeHtml(String(index))}"
+              >
+                Remove
+              </button>
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+  }
+
   if (ocrForm) {
+    if (ocrFileInput) {
+      ocrFileInput.addEventListener("change", () => {
+        const incomingFiles = Array.from(ocrFileInput.files || []);
+        const existingKeys = new Set(selectedSurveyFiles.map((file) => createFileSelectionKey(file)));
+
+        incomingFiles.forEach((file) => {
+          const key = createFileSelectionKey(file);
+          if (!existingKeys.has(key)) {
+            selectedSurveyFiles.push(file);
+            existingKeys.add(key);
+          }
+        });
+
+        syncSelectedSurveyFiles();
+        renderSelectedSurveyFiles();
+      });
+    }
+
+    if (ocrImagePreview) {
+      ocrImagePreview.addEventListener("click", (event) => {
+        const removeButton = event.target.closest("[data-remove-survey-image]");
+        if (!removeButton) {
+          return;
+        }
+
+        const index = Number(removeButton.dataset.removeSurveyImage);
+        if (!Number.isInteger(index) || index < 0 || index >= selectedSurveyFiles.length) {
+          return;
+        }
+
+        const [removedFile] = selectedSurveyFiles.splice(index, 1);
+        if (removedFile) {
+          releaseSurveyPreview(removedFile);
+        }
+        syncSelectedSurveyFiles();
+        renderSelectedSurveyFiles();
+      });
+    }
+
     ocrForm.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const formData = new FormData(ocrForm);
+      if (!selectedSurveyFiles.length) {
+        showGlobalBanner("Please select at least one survey image.", "error");
+        return;
+      }
+
+      const formData = new FormData();
+      selectedSurveyFiles.forEach((file) => formData.append("image", file));
 
       try {
         const result = await apiFetch("/api/surveys", {
@@ -2440,21 +2785,17 @@ async function initReportPage() {
           body: formData
         });
         if (ocrResult) {
-          ocrResult.innerHTML = `
-            <strong>OCR extracted text</strong>
-            <p class="helper-copy">Provider: ${result.ocr.provider} · Confidence: ${result.ocr.averageConfidence}</p>
-            <p class="helper-copy">Languages: ${(result.ocr.languagesDetected || []).join(", ") || "Unspecified"}</p>
-            <pre>${result.ocr.text}</pre>
-            ${
-              result.ocr.lowConfidenceWords?.length
-                ? `<p class="helper-copy">Flagged words for review: ${result.ocr.lowConfidenceWords.join(", ")}</p>`
-                : ""
-            }
-            <p class="helper-copy">${result.need.needsReview ? "Flagged for review because confidence fell below the threshold." : "Captured cleanly and routed into the live need queue."}</p>
-          `;
+          ocrResult.innerHTML = buildOcrBatchResultMarkup(result);
         }
-        showGlobalBanner("Survey image processed.", "success");
+        const summary = result.summary || {};
+        const processedCount = Number(summary.processedCount || 0);
+        const failedCount = Number(summary.failedCount || 0);
+        const bannerMessage = failedCount
+          ? `Processed ${processedCount} image${processedCount === 1 ? "" : "s"} with ${failedCount} failure${failedCount === 1 ? "" : "s"}.`
+          : `Processed ${processedCount} survey image${processedCount === 1 ? "" : "s"}.`;
+        showGlobalBanner(bannerMessage, failedCount ? "info" : "success");
         ocrForm.reset();
+        resetSurveySelection();
       } catch (error) {
         showGlobalBanner(error.message || "OCR upload failed.", "error");
       }
