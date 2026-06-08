@@ -230,6 +230,7 @@ These notes matter for deployment and for running the stack locally:
 - If you want the UI to talk to your local backend, update `frontend/main.js` to point at your local server origin.
 - The repo root does not contain a `package.json`; the active Node app lives under `backend/`.
 - `backend/package.json` exists, but its `dev` script points to `scripts/dev-local.js`, while that script currently lives at the repo root. So the direct, reliable startup command is `node server.js` from inside `backend/`, or `docker compose up --build` from the repo root.
+- The Docker setup builds from the repo root so the backend container can serve both `backend/` and `frontend/`.
 
 ## Hosting Notes
 

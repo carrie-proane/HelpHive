@@ -94,9 +94,11 @@
                 <h3>Handwritten survey OCR</h3>
                 <form class="stack-form" id="ocrUploadForm">
                   <label class="upload-dropzone">
-                    Survey image
-                    <input type="file" name="image" accept="image/*" required />
+                    Survey images
+                    <input type="file" name="image" accept="image/*" multiple required />
                   </label>
+                  <p class="helper-copy">Select one or more survey photos, then remove any you do not want before upload.</p>
+                  <div class="image-preview-grid" id="ocrImagePreview" aria-live="polite"></div>
                   <button class="cta-button" type="submit">Run OCR</button>
                 </form>
                 <div class="result-block" id="ocrResult">

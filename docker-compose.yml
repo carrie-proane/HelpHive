@@ -1,35 +1,35 @@
-version: '3.8'
+  services:
+    postgres:
+      image: postgis/postgis:16-3.4-alpine
+      environment:
+        POSTGRES_USER: postgres
+        POSTGRES_PASSWORD: postgres
+        POSTGRES_DB: kindredpune
+      ports:
+        - "5432:5432"
+      volumes:
+        - postgres_data:/var/lib/postgresql/data
+      healthcheck:
+        test: ["CMD-SHELL", "pg_isready -U postgres"]
+        interval: 10s
+        timeout: 5s
+        retries: 5
 
-services:
-  postgres:
-    image: postgis/postgis:16-3.4-alpine
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: kindredpune
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+    backend:
+      build:
+        context: .
+        dockerfile: ./backend/Dockerfile
+      ports:
+        - "3000:8080"
+      environment:
+        DATABASE_URL: postgres://postgres:postgres@postgres:5432/kindredpune
+        PORT: 8080
+        NODE_ENV: development
+      depends_on:
+        postgres:
+          condition: service_healthy
+      volumes:
+        - .:/usr/src/app
 
-  backend:
-    build: ./backend
-    ports:
-      - "3000:8080"
-    environment:
-      DATABASE_URL: postgres://postgres:postgres@postgres:5432/kindredpune
-      PORT: 8080
-      NODE_ENV: development
-    depends_on:
-      postgres:
-        condition: service_healthy
-    volumes:
-      - ./backend:/usr/src/app
-
-volumes:
-  postgres_data:
+  volumes:
+    postgres_data:

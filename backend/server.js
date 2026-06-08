@@ -46,6 +46,7 @@ const REPORTS_DIR = path.join(__dirname, "generated-reports");
 const UPLOAD_DIR = path.join(__dirname, "uploads");
 const TEMPLATE_PATH = path.join(__dirname, "templates", "csr-report.hbs");
 const SEED_DATA_FILE = path.join(__dirname, "data", "db.json");
+const MAX_SURVEY_UPLOAD_FILES = Number(process.env.MAX_SURVEY_UPLOAD_FILES || 10);
 const OCR_CONFIDENCE_THRESHOLD = Number(process.env.OCR_CONFIDENCE_THRESHOLD || 0.8);
 const OCR_LOW_CONFIDENCE_WORD_THRESHOLD = Number(
   process.env.OCR_LOW_CONFIDENCE_WORD_THRESHOLD || 0.72
@@ -242,6 +243,17 @@ function buildPublicOrigin(request) {
   return host ? `${protocol}://${host}` : "";
 }
 
+function buildUploadUrl(request, filename) {
+  const normalizedFilename = String(filename || "").trim();
+  if (!normalizedFilename) {
+    return null;
+  }
+
+  const relativePath = `/uploads/${encodeURIComponent(normalizedFilename)}`;
+  const origin = buildPublicOrigin(request);
+  return origin ? `${origin}${relativePath}` : relativePath;
+}
+
 function shouldRetryDatabaseConnection(error) {
   const code = error?.original?.code || error?.parent?.code || error?.code;
   return code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "EHOSTUNREACH";
@@ -306,6 +318,13 @@ const ROLE_LABELS = {
   ngo: "NGO Worker",
   admin: "Admin",
   corporate: "Corporate"
+};
+
+const TASK_STATUS = {
+  OPEN: "open",
+  PENDING_REVIEW: "pending_review",
+  REJECTED: "rejected",
+  COMPLETED: "completed"
 };
 
 const LOCALITY_INDEX = {
@@ -502,6 +521,29 @@ function normalizeSeverity(value) {
     return candidate;
   }
   return "stable";
+}
+
+function normalizeTaskStatus(value, fallback = TASK_STATUS.OPEN) {
+  const candidate = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+  return Object.values(TASK_STATUS).includes(candidate) ? candidate : fallback;
+}
+
+function shouldRequireReview(confidence, flaggedWords = []) {
+  const normalizedConfidence = clampConfidence(confidence, 0);
+  return (
+    normalizedConfidence < OCR_CONFIDENCE_THRESHOLD || normalizeArray(flaggedWords).length > 0
+  );
+}
+
+function buildLiveTaskWhere(additionalWhere = {}) {
+  return {
+    status: TASK_STATUS.OPEN,
+    completedAt: null,
+    ...additionalWhere
+  };
 }
 
 function normalizeMedicalTraining(value = "") {
@@ -1586,10 +1628,20 @@ const Task = sequelize.define(
       defaultValue: false,
       field: "is_assigned"
     },
+    status: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: TASK_STATUS.OPEN
+    },
     completedAt: {
       type: DataTypes.DATE,
       allowNull: true,
       field: "completed_at"
+    },
+    rejectedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "rejected_at"
     }
   },
   {
@@ -1926,6 +1978,18 @@ async function ensureDatabase() {
   await sequelize.query(
     "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS time_windows TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
   );
+  await sequelize.query(
+    `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT '${TASK_STATUS.OPEN}';`
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP WITH TIME ZONE;"
+  );
+  await sequelize.query(
+    `UPDATE tasks SET status = '${TASK_STATUS.COMPLETED}' WHERE completed_at IS NOT NULL;`
+  );
+  await sequelize.query(
+    `UPDATE tasks SET status = '${TASK_STATUS.PENDING_REVIEW}' WHERE id IN (SELECT task_id FROM reviews WHERE status = 'pending');`
+  );
   if (USE_POSTGIS) {
     await sequelize.query("CREATE INDEX IF NOT EXISTS volunteers_location_idx ON volunteers USING GIST (location);");
     await sequelize.query("CREATE INDEX IF NOT EXISTS tasks_location_idx ON tasks USING GIST (location);");
@@ -2036,9 +2100,14 @@ async function seedDatabase() {
       peopleServed: task.status === "completed" ? inferPeopleServed(task.type, task.severity) : 0,
       location: pointFromCoordinates(task.latitude, task.longitude),
       isAssigned: Boolean((task.assignedVolunteerIds || []).length),
+      status: normalizeTaskStatus(
+        task.status,
+        task.completedAt ? TASK_STATUS.COMPLETED : TASK_STATUS.OPEN
+      ),
       createdAt: task.createdAt ? new Date(task.createdAt) : new Date(),
       updatedAt: task.updatedAt ? new Date(task.updatedAt) : new Date(),
-      completedAt: task.completedAt ? new Date(task.completedAt) : null
+      completedAt: task.completedAt ? new Date(task.completedAt) : null,
+      rejectedAt: task.rejectedAt ? new Date(task.rejectedAt) : null
     });
 
     for (const volunteerUserId of task.assignedVolunteerIds || []) {
@@ -2106,6 +2175,7 @@ async function seedDatabase() {
 
   const lowConfidenceTasks = await Task.findAll({
     where: {
+      completedAt: null,
       severity: {
         [Op.in]: ["critical", "urgent"]
       }
@@ -2114,6 +2184,11 @@ async function seedDatabase() {
   });
 
   if (lowConfidenceTasks[0]) {
+    await lowConfidenceTasks[0].update({
+      status: TASK_STATUS.PENDING_REVIEW,
+      updatedAt: new Date()
+    });
+
     await Review.create({
       id: createId("review"),
       taskId: lowConfidenceTasks[0].id,
@@ -2334,7 +2409,16 @@ async function buildTaskPayload(task, currentUser = null) {
     locationName: taskWithRelations.locationName,
     latitude: taskCoords.lat,
     longitude: taskCoords.lng,
-    status: taskWithRelations.completedAt ? "completed" : taskWithRelations.isAssigned ? "in_progress" : "open",
+    status:
+      taskWithRelations.status === TASK_STATUS.PENDING_REVIEW
+        ? TASK_STATUS.PENDING_REVIEW
+        : taskWithRelations.status === TASK_STATUS.REJECTED
+          ? TASK_STATUS.REJECTED
+          : taskWithRelations.completedAt || taskWithRelations.status === TASK_STATUS.COMPLETED
+            ? TASK_STATUS.COMPLETED
+            : taskWithRelations.isAssigned
+              ? "in_progress"
+              : TASK_STATUS.OPEN,
     requiredSkills: routingProfile.requiredSkills,
     complementarySkills: routingProfile.complementarySkills,
     assignedUsers,
@@ -2374,6 +2458,7 @@ async function createTaskRecord({
   ngoUserId,
   companyId = null,
   source = "manual",
+  status = TASK_STATUS.OPEN,
   description,
   extractedText = "",
   title,
@@ -2427,7 +2512,9 @@ async function createTaskRecord({
     timeWindows: routingProfile.timeWindows,
     peopleServed,
     location: pointFromCoordinates(latitude, longitude),
-    isAssigned: false
+    isAssigned: false,
+    status: normalizeTaskStatus(status, TASK_STATUS.OPEN),
+    rejectedAt: null
   });
 }
 
@@ -2442,11 +2529,12 @@ async function createReviewIfNeeded({
   flaggedWords = [],
   evidence = [],
   pipeline = {},
-  languages = []
+  languages = [],
+  imageUrl = null,
+  imageUrls = []
 }) {
   const normalizedConfidence = clampConfidence(confidence, 0);
-  const requiresReview =
-    normalizedConfidence < OCR_CONFIDENCE_THRESHOLD || normalizeArray(flaggedWords).length > 0;
+  const requiresReview = shouldRequireReview(normalizedConfidence, flaggedWords);
 
   if (!requiresReview) {
     return null;
@@ -2467,6 +2555,8 @@ async function createReviewIfNeeded({
       evidence: uniqueValues(normalizeArray(evidence)),
       pipeline,
       languages: uniqueValues(normalizeArray(languages)),
+      imageUrl: imageUrl || null,
+      imageUrls: uniqueValues(normalizeArray(imageUrls)),
       trainingStatus: "pending_annotation"
     }
   });
@@ -2474,9 +2564,7 @@ async function createReviewIfNeeded({
 
 async function loadOpenTasksWithRelations() {
   return Task.findAll({
-    where: {
-      completedAt: null
-    },
+    where: buildLiveTaskWhere(),
     include: [
       { model: User, as: "ngo" },
       {
@@ -2594,9 +2682,7 @@ function buildSilentNeedAlertsFromTasks(tasks = []) {
 
 async function buildAlerts() {
   const tasks = await Task.findAll({
-    where: {
-      completedAt: null
-    },
+    where: buildLiveTaskWhere(),
     order: sequelize.literal('"Task"."updated_at" DESC')
   });
 
@@ -2613,7 +2699,7 @@ async function buildReviewQueue() {
   });
 
   return reviews
-    .filter((review) => review.task)
+    .filter((review) => review.task && review.task.status === TASK_STATUS.PENDING_REVIEW)
     .map((review) => ({
       id: review.id,
       taskId: review.taskId,
@@ -2631,7 +2717,9 @@ async function buildReviewQueue() {
       flaggedWords: review.correctedPayload?.flaggedWords || [],
       evidence: review.correctedPayload?.evidence || [],
       pipeline: review.correctedPayload?.pipeline || {},
-      languages: review.correctedPayload?.languages || []
+      languages: review.correctedPayload?.languages || [],
+      imageUrl: review.correctedPayload?.imageUrl || null,
+      imageUrls: review.correctedPayload?.imageUrls || []
     }));
 }
 
@@ -2654,9 +2742,7 @@ async function buildAdminSummary() {
 
 async function buildIssuePayloads() {
   const tasks = await Task.findAll({
-    where: {
-      completedAt: null
-    },
+    where: buildLiveTaskWhere(),
     include: [{ model: User, as: "ngo" }],
     order: sequelize.literal('"Task"."updated_at" DESC')
   });
@@ -3263,6 +3349,7 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 app.use("/generated-reports", express.static(REPORTS_DIR));
+app.use("/uploads", express.static(UPLOAD_DIR));
 app.use(express.static(FRONTEND_DIR));
 
 ROLE_PAGE_FILES.forEach((pageFile) => {
@@ -3637,6 +3724,11 @@ app.post("/api/tasks/:id/volunteer", requireAuth, requireRole(["volunteer", "adm
       return;
     }
 
+    if (task.status !== TASK_STATUS.OPEN) {
+      response.status(400).json({ error: "This task is not available for volunteering." });
+      return;
+    }
+
     if (task.completedAt) {
       response.status(400).json({ error: "This task is already completed." });
       return;
@@ -3705,6 +3797,7 @@ app.post("/api/tasks/:id/complete", requireAuth, async (request, response, next)
 
     await task.update({
       completedAt: new Date(),
+      status: TASK_STATUS.COMPLETED,
       peopleServed: task.peopleServed || inferPeopleServed(task.type, task.severity),
       updatedAt: new Date()
     });
@@ -3729,10 +3822,9 @@ app.post("/api/tasks/:id/complete", requireAuth, async (request, response, next)
 app.post("/api/match", requireAuth, requireRole(["admin"]), async (request, response, next) => {
   try {
     const tasks = await Task.findAll({
-      where: {
-        completedAt: null,
+      where: buildLiveTaskWhere({
         isAssigned: false
-      },
+      }),
       order: [sequelize.literal('"Task"."severity" ASC'), sequelize.literal('"Task"."updated_at" DESC')]
     });
 
@@ -3741,7 +3833,7 @@ app.post("/api/match", requireAuth, requireRole(["admin"]), async (request, resp
     });
 
     const activeAssignments = await Assignment.findAll({
-      include: [{ model: Task, as: "task", where: { completedAt: null } }]
+      include: [{ model: Task, as: "task", where: buildLiveTaskWhere() }]
     });
 
     const unavailableVolunteerIds = new Set(activeAssignments.map((assignment) => assignment.volunteerId));
@@ -3838,68 +3930,116 @@ app.post(
   "/api/surveys",
   requireAuth,
   requireRole(["ngo", "admin"]),
-  upload.single("image"),
+  upload.array("image", MAX_SURVEY_UPLOAD_FILES),
   async (request, response, next) => {
     try {
-      if (!request.file) {
-        response.status(400).json({ error: "Please upload a survey image." });
+      const files = Array.isArray(request.files) ? request.files : [];
+      if (!files.length) {
+        response.status(400).json({ error: "Please upload at least one survey image." });
         return;
       }
 
-      const ocr = await runOCR(request.file.path, request.file.mimetype || "");
-      const parsed = extractNeedSignals(ocr.text, ocr.structuredExtraction || {});
-      const task = await createTaskRecord({
-        ngoUserId: request.user.id,
-        source: "ocr",
-        description: ocr.text || "OCR survey intake",
-        extractedText: ocr.text,
-        title: parsed.title,
-        type: parsed.type,
-        severity: parsed.severity,
-        locationName: parsed.locationName,
-        latitude: parsed.latitude,
-        longitude: parsed.longitude,
-        requiredSkills: parsed.requiredSkills,
-        complementarySkills: parsed.complementarySkills,
-        preferredLanguages: parsed.preferredLanguages,
-        preferredCommunicationStyles: parsed.preferredCommunicationStyles,
-        contextTags: parsed.contextTags,
-        minimumMedicalTraining: parsed.minimumMedicalTraining,
-        category: parsed.category,
-        timeWindows: parsed.timeWindows,
-        peopleServed: inferPeopleServed(parsed.type, parsed.severity)
-      });
+      const batchImageUrls = files.map((file) => buildUploadUrl(request, file.filename)).filter(Boolean);
+      const results = [];
+      let processedCount = 0;
+      let passedCount = 0;
+      let flaggedCount = 0;
+      let failedCount = 0;
 
-      const review = await createReviewIfNeeded({
-        taskId: task.id,
-        source: "ocr",
-        rawText: ocr.text,
-        confidence: ocr.averageConfidence,
-        suggestedType: parsed.type,
-        suggestedSeverity: parsed.severity,
-        suggestedLocation: parsed.locationName,
-        flaggedWords: ocr.lowConfidenceWords,
-        evidence: parsed.evidence,
-        pipeline: {
-          provider: ocr.provider,
-          model: ocr.model,
-          engines: ocr.engines,
-          keyPhrases: ocr.keyPhrases
-        },
-        languages: ocr.languagesDetected
-      });
+      for (const file of files) {
+        const filename = file.originalname || file.filename || path.basename(file.path || "");
+        const imageUrl = buildUploadUrl(request, file.filename);
+
+        try {
+          const ocr = await runOCR(file.path, file.mimetype || "");
+          const parsed = extractNeedSignals(ocr.text, ocr.structuredExtraction || {});
+          const needsReview = shouldRequireReview(ocr.averageConfidence, ocr.lowConfidenceWords);
+          const task = await createTaskRecord({
+            ngoUserId: request.user.id,
+            source: "ocr",
+            status: needsReview ? TASK_STATUS.PENDING_REVIEW : TASK_STATUS.OPEN,
+            description: ocr.text || "OCR survey intake",
+            extractedText: ocr.text,
+            title: parsed.title,
+            type: parsed.type,
+            severity: parsed.severity,
+            locationName: parsed.locationName,
+            latitude: parsed.latitude,
+            longitude: parsed.longitude,
+            requiredSkills: parsed.requiredSkills,
+            complementarySkills: parsed.complementarySkills,
+            preferredLanguages: parsed.preferredLanguages,
+            preferredCommunicationStyles: parsed.preferredCommunicationStyles,
+            contextTags: parsed.contextTags,
+            minimumMedicalTraining: parsed.minimumMedicalTraining,
+            category: parsed.category,
+            timeWindows: parsed.timeWindows,
+            peopleServed: inferPeopleServed(parsed.type, parsed.severity)
+          });
+
+          const review = await createReviewIfNeeded({
+            taskId: task.id,
+            source: "ocr",
+            rawText: ocr.text,
+            confidence: ocr.averageConfidence,
+            suggestedType: parsed.type,
+            suggestedSeverity: parsed.severity,
+            suggestedLocation: parsed.locationName,
+            flaggedWords: ocr.lowConfidenceWords,
+            evidence: parsed.evidence,
+            pipeline: {
+              provider: ocr.provider,
+              model: ocr.model,
+              engines: ocr.engines,
+              keyPhrases: ocr.keyPhrases
+            },
+            languages: ocr.languagesDetected,
+            imageUrl,
+            imageUrls: batchImageUrls
+          });
+
+          processedCount += 1;
+          if (review) {
+            flaggedCount += 1;
+          } else {
+            passedCount += 1;
+          }
+
+          results.push({
+            filename,
+            imageUrl,
+            imageUrls: batchImageUrls,
+            ocr,
+            need: {
+              id: task.id,
+              title: task.title,
+              type: task.type,
+              severity: task.severity,
+              locationName: task.locationName,
+              needsReview: Boolean(review)
+            },
+            reviewId: review?.id || null
+          });
+        } catch (error) {
+          failedCount += 1;
+          results.push({
+            filename,
+            imageUrl,
+            imageUrls: batchImageUrls,
+            error: error.message || "Survey image could not be processed."
+          });
+        }
+      }
 
       response.status(201).json({
-        ocr,
-        need: {
-          id: task.id,
-          title: task.title,
-          type: task.type,
-          severity: task.severity,
-          locationName: task.locationName,
-          needsReview: Boolean(review)
+        summary: {
+          submittedCount: files.length,
+          processedCount,
+          passedCount,
+          flaggedCount,
+          failedCount
         },
-        reviewId: review?.id || null
+        results
       });
     } catch (error) {
       next(error);
@@ -3921,9 +4061,11 @@ app.post(
 
       const transcript = await transcribeAudio(request.file.path, request.file.mimetype || "audio/webm");
       const parsed = extractNeedSignals(transcript.text, transcript.structuredExtraction || {});
+      const needsReview = shouldRequireReview(transcript.averageConfidence, []);
       const task = await createTaskRecord({
         ngoUserId: request.user.id,
         source: "voice",
+        status: needsReview ? TASK_STATUS.PENDING_REVIEW : TASK_STATUS.OPEN,
         description: transcript.text,
         extractedText: transcript.text,
         title: parsed.title,
@@ -4050,6 +4192,11 @@ app.put("/api/needs/:id", requireAuth, requireRole(["admin"]), async (request, r
       return;
     }
 
+    if (review.status !== "pending") {
+      response.status(400).json({ error: "This review item has already been processed." });
+      return;
+    }
+
     const location = detectLocation(request.body.locationName || review.task.locationName);
     const correctedText = String(request.body.correctedText || request.body.description || "").trim();
     const existingPayload = review.correctedPayload || {};
@@ -4072,6 +4219,7 @@ app.put("/api/needs/:id", requireAuth, requireRole(["admin"]), async (request, r
       description: correctedText || request.body.description || review.task.description,
       severity: normalizeSeverity(request.body.severity || review.task.severity),
       locationName: request.body.locationName || review.task.locationName,
+      status: TASK_STATUS.OPEN,
       category: routingProfile.category,
       requiredSkills: routingProfile.requiredSkills,
       complementarySkills: routingProfile.complementarySkills,
@@ -4081,6 +4229,7 @@ app.put("/api/needs/:id", requireAuth, requireRole(["admin"]), async (request, r
       minimumMedicalTraining: routingProfile.minimumMedicalTraining,
       timeWindows: routingProfile.timeWindows,
       location: pointFromCoordinates(location.lat, location.lng),
+      rejectedAt: null,
       updatedAt: new Date()
     });
 
@@ -4099,6 +4248,46 @@ app.put("/api/needs/:id", requireAuth, requireRole(["admin"]), async (request, r
     });
 
     response.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/needs/:id/reject", requireAuth, requireRole(["admin"]), async (request, response, next) => {
+  try {
+    const review = await Review.findByPk(request.params.id, {
+      include: [{ model: Task, as: "task" }]
+    });
+
+    if (!review || !review.task) {
+      response.status(404).json({ error: "Review item not found." });
+      return;
+    }
+
+    if (review.status !== "pending") {
+      response.status(400).json({ error: "This review item has already been processed." });
+      return;
+    }
+
+    const rejectedAt = new Date();
+    const existingPayload = review.correctedPayload || {};
+
+    await review.task.update({
+      status: TASK_STATUS.REJECTED,
+      rejectedAt,
+      updatedAt: rejectedAt
+    });
+
+    await review.update({
+      status: "rejected",
+      correctedPayload: {
+        ...existingPayload,
+        trainingStatus: "rejected_for_feedback",
+        rejectedAt: rejectedAt.toISOString()
+      }
+    });
+
+    response.json({ ok: true, rejectedAt: rejectedAt.toISOString() });
   } catch (error) {
     next(error);
   }
