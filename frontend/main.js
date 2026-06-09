@@ -778,6 +778,99 @@ function buildOcrBatchSummaryMarkup(summary = {}) {
   `;
 }
 
+function isLikelyTableLine(line = "") {
+  return (String(line).match(/\|/g) || []).length >= 2;
+}
+
+function splitTableCells(line = "") {
+  return String(line)
+    .split("|")
+    .map((cell) => cell.trim())
+    .filter((cell, index, cells) => cell || (index > 0 && index < cells.length - 1));
+}
+
+function renderTextBlockMarkup(lines = []) {
+  const text = lines.join("\n").trim();
+  return text ? `<pre>${escapeHtml(text)}</pre>` : "";
+}
+
+function renderOcrTableMarkup(lines = []) {
+  const rows = lines
+    .map(splitTableCells)
+    .filter(
+      (cells) =>
+        cells.length >= 2 && !cells.every((cell) => /^:?-{3,}:?$/.test(String(cell).trim()))
+    );
+  if (!rows.length) {
+    return renderTextBlockMarkup(lines);
+  }
+
+  const columnCount = Math.max(...rows.map((row) => row.length));
+  const normalizedRows = rows.map((row) =>
+    Array.from({ length: columnCount }, (_, index) => row[index] || "")
+  );
+  const [headerRow, ...bodyRows] = normalizedRows;
+
+  return `
+    <div class="ocr-table-wrap">
+      <table class="ocr-table">
+        <thead>
+          <tr>
+            ${headerRow.map((cell) => `<th>${escapeHtml(cell)}</th>`).join("")}
+          </tr>
+        </thead>
+        <tbody>
+          ${bodyRows
+            .map(
+              (row) => `
+                <tr>
+                  ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
+                </tr>
+              `
+            )
+            .join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function renderOcrTextMarkup(text = "") {
+  const lines = String(text || "").split(/\r?\n/);
+  const blocks = [];
+  let currentTextLines = [];
+  let currentTableLines = [];
+
+  function flushText() {
+    if (currentTextLines.length) {
+      blocks.push(renderTextBlockMarkup(currentTextLines));
+      currentTextLines = [];
+    }
+  }
+
+  function flushTable() {
+    if (currentTableLines.length) {
+      blocks.push(renderOcrTableMarkup(currentTableLines));
+      currentTableLines = [];
+    }
+  }
+
+  for (const line of lines) {
+    if (isLikelyTableLine(line)) {
+      flushText();
+      currentTableLines.push(line);
+    } else {
+      flushTable();
+      currentTextLines.push(line);
+    }
+  }
+
+  flushText();
+  flushTable();
+
+  return `<div class="ocr-rendered-text">${blocks.filter(Boolean).join("")}</div>`;
+}
+
 function buildOcrBatchResultMarkup(payload = {}) {
   const results = Array.isArray(payload.results) ? payload.results : [];
 
@@ -827,7 +920,7 @@ function buildOcrBatchResultMarkup(payload = {}) {
                       <p class="helper-copy">
                         Languages: ${escapeHtml(joinReadableList(entry.ocr?.languagesDetected || [], "Unspecified"))}
                       </p>
-                      <pre>${escapeHtml(entry.ocr?.text || "")}</pre>
+                      ${renderOcrTextMarkup(entry.ocr?.text || "")}
                       ${
                         entry.ocr?.lowConfidenceWords?.length
                           ? `<p class="helper-copy">Flagged words: ${escapeHtml(entry.ocr.lowConfidenceWords.join(", "))}</p>`
