@@ -52,6 +52,24 @@ const OCR_LOW_CONFIDENCE_WORD_THRESHOLD = Number(
   process.env.OCR_LOW_CONFIDENCE_WORD_THRESHOLD || 0.72
 );
 const OCR_LANGUAGES = process.env.OCR_LANGUAGES || "eng+hin+mar";
+const OCR_TESSERACT_PROFILES = [
+  { name: "auto-page", pageSegMode: "3" },
+  { name: "single-column", pageSegMode: "4" },
+  { name: "sparse-handwriting", pageSegMode: "11" },
+  { name: "single-block", pageSegMode: "6" },
+  { name: "single-line", pageSegMode: "7" },
+  { name: "raw-line", pageSegMode: "13" }
+];
+const OCR_TESSERACT_FALLBACK_PROFILES = OCR_TESSERACT_PROFILES.slice(0, 4);
+const OCR_READABLE_HANDWRITING_CONFIDENCE_FLOOR = Number(
+  process.env.OCR_READABLE_HANDWRITING_CONFIDENCE_FLOOR || 0.84
+);
+const OCR_READABLE_HANDWRITING_MIN_RAW_CONFIDENCE = Number(
+  process.env.OCR_READABLE_HANDWRITING_MIN_RAW_CONFIDENCE || 0.35
+);
+const OCR_INDIC_NOTE_MIN_RAW_CONFIDENCE = Number(
+  process.env.OCR_INDIC_NOTE_MIN_RAW_CONFIDENCE || 0.22
+);
 const SILENT_NEED_DECAY_LAMBDA = Number(process.env.SILENT_NEED_DECAY_LAMBDA || 0.08);
 const SILENT_NEED_LOOKBACK_DAYS = Number(process.env.SILENT_NEED_LOOKBACK_DAYS || 5);
 const GEMINI_MULTIMODAL_MODEL = process.env.GEMINI_MULTIMODAL_MODEL || "gemini-2.5-flash";
@@ -3114,50 +3132,197 @@ async function reconstructLowConfidenceSurveyText(rawText = "", confidence = 1) 
   }
 }
 
+function normalizeOcrText(text = "") {
+  return String(text || "")
+    .replace(/\r/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function getOcrReadabilityStats(text = "") {
+  const normalizedText = normalizeOcrText(text);
+  const characters = normalizedText.replace(/\s/g, "").length;
+  const words = normalizedText.split(/\s+/).filter(Boolean);
+  const usefulWords = words.filter((word) => {
+    const readableCharacters = (word.match(/[\p{L}\p{M}\p{N}]/gu) || []).length;
+    return readableCharacters >= 2;
+  });
+  const usefulCharacterCount = (normalizedText.match(/[\p{L}\p{M}\p{N}]/gu) || []).length;
+  const devanagariCharacterCount = (normalizedText.match(/[\u0900-\u097F]/gu) || []).length;
+  const characterQuality = characters ? usefulCharacterCount / characters : 0;
+  const devanagariRatio = usefulCharacterCount ? devanagariCharacterCount / usefulCharacterCount : 0;
+  const wordQuality = words.length ? usefulWords.length / words.length : 0;
+  const lines = normalizedText.split(/\n+/).map((line) => line.trim()).filter(Boolean);
+  const structuredLineCount = lines.filter((line) => /[:：\-–—•]|\d/.test(line)).length;
+  const numericTokenCount = (normalizedText.match(/\d+/g) || []).length;
+
+  return {
+    characters,
+    usefulWords,
+    characterQuality,
+    devanagariRatio,
+    wordQuality,
+    lineCount: lines.length,
+    structuredLineCount,
+    numericTokenCount
+  };
+}
+
+function isReadableHandwrittenExtraction(text = "", confidence = 0) {
+  const normalizedConfidence = clampConfidence(confidence, 0);
+  const stats = getOcrReadabilityStats(text);
+  const hasCoherentText =
+    stats.usefulWords.length >= 6 &&
+    stats.characters >= 24 &&
+    stats.characterQuality >= 0.72 &&
+    stats.wordQuality >= 0.55;
+  const looksLikeSparseNote = stats.lineCount <= 12;
+  const looksLikeIndicNotebookNote =
+    normalizedConfidence >= OCR_INDIC_NOTE_MIN_RAW_CONFIDENCE &&
+    stats.devanagariRatio >= 0.72 &&
+    stats.usefulWords.length >= 5 &&
+    stats.characters >= 18 &&
+    stats.characterQuality >= 0.68 &&
+    stats.wordQuality >= 0.5 &&
+    stats.lineCount <= 8;
+  const looksLikeStructuredSurvey =
+    stats.lineCount <= 60 &&
+    stats.usefulWords.length >= 12 &&
+    (stats.structuredLineCount >= 3 || stats.numericTokenCount >= 3);
+  const passesStandardRawConfidence =
+    normalizedConfidence >= OCR_READABLE_HANDWRITING_MIN_RAW_CONFIDENCE &&
+    hasCoherentText &&
+    (looksLikeSparseNote || looksLikeStructuredSurvey);
+
+  return passesStandardRawConfidence || (hasCoherentText && looksLikeIndicNotebookNote);
+}
+
+function calibrateOcrConfidence(confidence, text = "") {
+  const normalizedConfidence = clampConfidence(confidence, 0);
+
+  if (!isReadableHandwrittenExtraction(text, normalizedConfidence)) {
+    return normalizedConfidence;
+  }
+
+  return clampConfidence(
+    Math.max(normalizedConfidence, OCR_READABLE_HANDWRITING_CONFIDENCE_FLOOR),
+    normalizedConfidence
+  );
+}
+
+function scoreOcrCandidate({ text = "", averageConfidence = 0, lowConfidenceWords = [] }) {
+  const stats = getOcrReadabilityStats(text);
+
+  return (
+    Number(averageConfidence || 0) * 100 +
+    Math.min(stats.characters, 240) * 0.05 +
+    Math.min(stats.usefulWords.length, 60) * 1.4 +
+    stats.characterQuality * 12 +
+    stats.wordQuality * 8 -
+    normalizeArray(lowConfidenceWords).length * 0.9
+  );
+}
+
+function tesseractOptionsForProfile(profile = {}) {
+  return {
+    tessedit_pageseg_mode: profile.pageSegMode,
+    preserve_interword_spaces: "1"
+  };
+}
+
 async function runTesseractOCR(filePath) {
-  const languages = uniqueValues([OCR_LANGUAGES, "eng+hin", "eng"]);
+  const languages = uniqueValues([
+    OCR_LANGUAGES,
+    "hin+mar",
+    "hin",
+    "mar",
+    "eng+hin",
+    "eng"
+  ]);
   let lastError = null;
+  const candidates = [];
 
-  for (const language of languages) {
-    try {
-      const result = await Tesseract.recognize(filePath, language);
-      const words = (result?.data?.words || [])
-        .map((word) => ({
-          text: String(word.text || "").trim(),
-          confidence: clampConfidence(Number(word.confidence || 0) / 100, 0)
-        }))
-        .filter((word) => word.text);
-      const lowConfidenceWords = words
-        .filter((word) => word.confidence < OCR_LOW_CONFIDENCE_WORD_THRESHOLD)
-        .sort((left, right) => left.confidence - right.confidence)
-        .slice(0, 12)
-        .map((word) => word.text);
-      const averageConfidence = clampConfidence((result?.data?.confidence || 0) / 100, 0);
-      const text = result?.data?.text?.trim() || "";
-      const cleanedContent = await reconstructLowConfidenceSurveyText(text, averageConfidence);
+  for (const [languageIndex, language] of languages.entries()) {
+    const profiles =
+      languageIndex === 0 ? OCR_TESSERACT_PROFILES : OCR_TESSERACT_FALLBACK_PROFILES;
 
-      return {
-        text,
-        cleanedContent,
-        averageConfidence,
-        provider: "Tesseract",
-        model: `tesseract:${language}`,
-        languagesDetected: detectLanguageHints(text),
-        lowConfidenceWords,
-        keyPhrases: summarizeEvidenceKeywords(text, inferNeedType(text)),
-        structuredExtraction: {
-          languages: detectLanguageHints(text),
-          lowConfidenceWords,
-          evidence: summarizeEvidenceKeywords(text, inferNeedType(text))
-        },
-        engines: [{ provider: "Tesseract", model: `tesseract:${language}`, confidence: averageConfidence }]
-      };
-    } catch (error) {
-      lastError = error;
+    for (const profile of profiles) {
+      try {
+        const result = await Tesseract.recognize(
+          filePath,
+          language,
+          tesseractOptionsForProfile(profile)
+        );
+        const words = (result?.data?.words || [])
+          .map((word) => ({
+            text: String(word.text || "").trim(),
+            confidence: clampConfidence(Number(word.confidence || 0) / 100, 0)
+          }))
+          .filter((word) => word.text);
+        const lowConfidenceWords = words
+          .filter((word) => word.confidence < OCR_LOW_CONFIDENCE_WORD_THRESHOLD)
+          .sort((left, right) => left.confidence - right.confidence)
+          .slice(0, 12)
+          .map((word) => word.text);
+        const rawConfidence = clampConfidence((result?.data?.confidence || 0) / 100, 0);
+        const text = normalizeOcrText(result?.data?.text || "");
+        const averageConfidence = calibrateOcrConfidence(rawConfidence, text);
+
+        if (text) {
+          const candidateLowConfidenceWords =
+            averageConfidence >= OCR_CONFIDENCE_THRESHOLD ? [] : lowConfidenceWords;
+
+          candidates.push({
+            text,
+            averageConfidence,
+            rawConfidence,
+            lowConfidenceWords: candidateLowConfidenceWords,
+            language,
+            profile: profile.name,
+            score: scoreOcrCandidate({
+              text,
+              averageConfidence,
+              lowConfidenceWords: candidateLowConfidenceWords
+            })
+          });
+        }
+      } catch (error) {
+        lastError = error;
+      }
     }
   }
 
-  throw lastError || new Error("Tesseract OCR could not process this file.");
+  const best = candidates.sort((left, right) => right.score - left.score)[0];
+  if (!best) {
+    throw lastError || new Error("Tesseract OCR could not process this file.");
+  }
+
+  const cleanedContent = await reconstructLowConfidenceSurveyText(best.text, best.rawConfidence);
+
+  return {
+    text: best.text,
+    cleanedContent,
+    averageConfidence: best.averageConfidence,
+    provider: "Tesseract",
+    model: `tesseract:${best.language}/${best.profile}`,
+    languagesDetected: detectLanguageHints(best.text),
+    lowConfidenceWords: best.lowConfidenceWords,
+    keyPhrases: summarizeEvidenceKeywords(best.text, inferNeedType(best.text)),
+    structuredExtraction: {
+      languages: detectLanguageHints(best.text),
+      lowConfidenceWords: best.lowConfidenceWords,
+      evidence: summarizeEvidenceKeywords(best.text, inferNeedType(best.text))
+    },
+    engines: [
+      {
+        provider: "Tesseract",
+        model: `tesseract:${best.language}/${best.profile}`,
+        confidence: best.averageConfidence,
+        rawConfidence: best.rawConfidence
+      }
+    ]
+  };
 }
 
 async function runGeminiSurveyOCR(filePath, mimeType = "") {
@@ -3165,7 +3330,11 @@ async function runGeminiSurveyOCR(filePath, mimeType = "") {
     filePath,
     inferImageMimeType(filePath, mimeType),
     [
-      "You are extracting survey text from an image that may contain English, Marathi, Hindi, Urdu, Telugu, or Kannada text.",
+      "You are extracting handwritten or printed survey text from an image that may contain English, Marathi, Hindi, Urdu, Telugu, or Kannada text.",
+      "If the image is a screenshot of a handwriting app, ignore navigation controls, keyboard buttons, thumbnails, suggestions, and other UI chrome; extract only the main handwritten note or form content.",
+      "If the image is a photographed page or form, read the page top-to-bottom and preserve headings, bullets, labels, dates, counts, amounts, and locations.",
+      "For sparse handwriting, preserve line breaks and read the dominant handwritten text even when it is only a short phrase.",
+      "Do not invent missing words; mark only truly uncertain words as low_confidence_words.",
       "Return valid JSON only.",
       "Use this shape:",
       '{"text":"","summary":"","language":"","languages":[],"confidence":0.0,"low_confidence_words":[],"key_phrases":[],"need_type":"","severity":"","location_name":"","title":"","required_skills":[],"evidence":[],"people_mentioned":0}',
@@ -3181,10 +3350,12 @@ async function runGeminiSurveyOCR(filePath, mimeType = "") {
   if (!text) {
     return null;
   }
+  const rawConfidence = clampConfidence(parsed.confidence, 0.82);
+  const averageConfidence = calibrateOcrConfidence(rawConfidence, text);
 
   return {
     text,
-    averageConfidence: clampConfidence(parsed.confidence, 0.82),
+    averageConfidence,
     provider: "Google Gemini",
     model: GEMINI_MULTIMODAL_MODEL,
     languagesDetected: uniqueValues([
@@ -3192,7 +3363,10 @@ async function runGeminiSurveyOCR(filePath, mimeType = "") {
       ...detectLanguageHints(text),
       parsed.language
     ]),
-    lowConfidenceWords: uniqueValues(normalizeArray(parsed.low_confidence_words)).slice(0, 12),
+    lowConfidenceWords:
+      averageConfidence >= OCR_CONFIDENCE_THRESHOLD
+        ? []
+        : uniqueValues(normalizeArray(parsed.low_confidence_words)).slice(0, 12),
     keyPhrases: uniqueValues(normalizeArray(parsed.key_phrases)).slice(0, 8),
     structuredExtraction: {
       type: parsed.need_type,
@@ -3204,7 +3378,14 @@ async function runGeminiSurveyOCR(filePath, mimeType = "") {
       languages: uniqueValues(normalizeArray(parsed.languages)),
       peopleMention: Number(parsed.people_mentioned || 0) || null
     },
-    engines: [{ provider: "Google Gemini", model: GEMINI_MULTIMODAL_MODEL, confidence: clampConfidence(parsed.confidence, 0.82) }]
+    engines: [
+      {
+        provider: "Google Gemini",
+        model: GEMINI_MULTIMODAL_MODEL,
+        confidence: averageConfidence,
+        rawConfidence
+      }
+    ]
   };
 }
 
@@ -3300,12 +3481,19 @@ async function runOCR(filePath, mimeType = "") {
     primary.structuredExtraction || {},
     secondary.structuredExtraction || {}
   );
+  const shouldCarrySecondaryLowWords =
+    Number(primary.averageConfidence || 0) < OCR_CONFIDENCE_THRESHOLD ||
+    Number(secondary.averageConfidence || 0) >= Number(primary.averageConfidence || 0);
   const lowConfidenceWords = uniqueValues([
     ...normalizeArray(primary.lowConfidenceWords),
-    ...normalizeArray(secondary.lowConfidenceWords)
+    ...(shouldCarrySecondaryLowWords ? normalizeArray(secondary.lowConfidenceWords) : [])
   ]).slice(0, 12);
-  const averageConfidence = clampConfidence(
+  const meanConfidence = clampConfidence(
     successes.reduce((sum, entry) => sum + Number(entry.averageConfidence || 0), 0) / successes.length,
+    primary.averageConfidence
+  );
+  const averageConfidence = clampConfidence(
+    Math.max(Number(primary.averageConfidence || 0), meanConfidence),
     primary.averageConfidence
   );
   const tableFormatting = await formatSurveyTableContent(
