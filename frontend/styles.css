@@ -3379,12 +3379,66 @@ body.modal-open {
   background: var(--surface-card);
 }
 
-.result-block pre {
+.result-block pre,
+.ocr-rendered-text pre {
   margin: 14px 0 0;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: "Manrope", sans-serif;
   line-height: 1.7;
+}
+
+.ocr-rendered-text {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  width: 100%;
+  min-width: 0;
+}
+
+.ocr-rendered-text pre {
+  margin: 0;
+}
+
+.ocr-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 18px;
+  border: 1px solid rgba(var(--page-ink-rgb), 0.1);
+  background: rgba(255, 255, 255, 0.58);
+}
+
+.ocr-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font-size: 0.92rem;
+  line-height: 1.55;
+}
+
+.ocr-table th,
+.ocr-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(var(--page-ink-rgb), 0.09);
+  border-right: 1px solid rgba(var(--page-ink-rgb), 0.08);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.ocr-table th:last-child,
+.ocr-table td:last-child {
+  border-right: 0;
+}
+
+.ocr-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ocr-table th {
+  background: rgba(var(--page-ink-rgb), 0.06);
+  font-weight: 800;
+  color: rgba(var(--page-ink-rgb), 0.78);
 }
 
 .auth-layout {
@@ -3556,7 +3610,7 @@ body.modal-open {
 
 .ocr-result-card {
   display: grid;
-  grid-template-columns: minmax(150px, 180px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   padding: 16px;
 }
@@ -3571,9 +3625,8 @@ body.modal-open {
 
 .ocr-result-image-frame img {
   width: 100%;
-  height: 100%;
-  max-height: 180px;
-  object-fit: cover;
+  max-height: 280px;
+  object-fit: contain;
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.68);
 }
