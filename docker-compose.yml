@@ -30,6 +30,7 @@
           condition: service_healthy
       volumes:
         - .:/usr/src/app
+        - /usr/src/app/backend/node_modules
 
   volumes:
     postgres_data:
