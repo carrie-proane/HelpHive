@@ -3103,6 +3103,47 @@ async function runGeminiStructuredExtraction(filePath, mimeType, prompt, model =
   return parseModelJson(response.text || "", {});
 }
 
+function getExternalApiErrorStatus(error) {
+  return Number(
+    error?.status ||
+      error?.statusCode ||
+      error?.code ||
+      error?.response?.status ||
+      error?.error?.code ||
+      0
+  );
+}
+
+function isRecoverableGeminiError(error) {
+  const status = getExternalApiErrorStatus(error);
+  const message = String(error?.message || "");
+
+  return (
+    status === 400 ||
+    status === 401 ||
+    status === 403 ||
+    status === 404 ||
+    status === 429 ||
+    status >= 500 ||
+    /API key|RESOURCE_EXHAUSTED|quota|billing|prepayment|provider/i.test(message)
+  );
+}
+
+function describeGeminiOcrFailure(error) {
+  const status = getExternalApiErrorStatus(error);
+  const message = String(error?.message || "");
+
+  if (status === 429 || /RESOURCE_EXHAUSTED|quota|billing|prepayment/i.test(message)) {
+    return "Gemini OCR is temporarily unavailable because the API quota or billing credits are exhausted.";
+  }
+
+  if (status === 401 || status === 403 || /API key/i.test(message)) {
+    return "Gemini OCR is temporarily unavailable because the API key is not authorized.";
+  }
+
+  return "Gemini OCR is temporarily unavailable.";
+}
+
 async function runGeminiPlainText(prompt, model = GEMINI_MULTIMODAL_MODEL) {
   if (!geminiClient) {
     return "";
@@ -3326,21 +3367,32 @@ async function runTesseractOCR(filePath) {
 }
 
 async function runGeminiSurveyOCR(filePath, mimeType = "") {
-  const parsed = await runGeminiStructuredExtraction(
-    filePath,
-    inferImageMimeType(filePath, mimeType),
-    [
-      "You are extracting handwritten or printed survey text from an image that may contain English, Marathi, Hindi, Urdu, Telugu, or Kannada text.",
-      "If the image is a screenshot of a handwriting app, ignore navigation controls, keyboard buttons, thumbnails, suggestions, and other UI chrome; extract only the main handwritten note or form content.",
-      "If the image is a photographed page or form, read the page top-to-bottom and preserve headings, bullets, labels, dates, counts, amounts, and locations.",
-      "For sparse handwriting, preserve line breaks and read the dominant handwritten text even when it is only a short phrase.",
-      "Do not invent missing words; mark only truly uncertain words as low_confidence_words.",
-      "Return valid JSON only.",
-      "Use this shape:",
-      '{"text":"","summary":"","language":"","languages":[],"confidence":0.0,"low_confidence_words":[],"key_phrases":[],"need_type":"","severity":"","location_name":"","title":"","required_skills":[],"evidence":[],"people_mentioned":0}',
-      "Preserve local-language words exactly. Confidence must be between 0 and 1."
-    ].join(" ")
-  );
+  let parsed = null;
+
+  try {
+    parsed = await runGeminiStructuredExtraction(
+      filePath,
+      inferImageMimeType(filePath, mimeType),
+      [
+        "You are extracting handwritten or printed survey text from an image that may contain English, Marathi, Hindi, Urdu, Telugu, or Kannada text.",
+        "If the image is a screenshot of a handwriting app, ignore navigation controls, keyboard buttons, thumbnails, suggestions, and other UI chrome; extract only the main handwritten note or form content.",
+        "If the image is a photographed page or form, read the page top-to-bottom and preserve headings, bullets, labels, dates, counts, amounts, and locations.",
+        "For sparse handwriting, preserve line breaks and read the dominant handwritten text even when it is only a short phrase.",
+        "Do not invent missing words; mark only truly uncertain words as low_confidence_words.",
+        "Return valid JSON only.",
+        "Use this shape:",
+        '{"text":"","summary":"","language":"","languages":[],"confidence":0.0,"low_confidence_words":[],"key_phrases":[],"need_type":"","severity":"","location_name":"","title":"","required_skills":[],"evidence":[],"people_mentioned":0}',
+        "Preserve local-language words exactly. Confidence must be between 0 and 1."
+      ].join(" ")
+    );
+  } catch (error) {
+    if (isRecoverableGeminiError(error)) {
+      console.warn(`${describeGeminiOcrFailure(error)} Falling back to Tesseract OCR.`);
+      return null;
+    }
+
+    throw error;
+  }
 
   if (!parsed || typeof parsed !== "object") {
     return null;
@@ -3468,7 +3520,19 @@ async function runOCR(filePath, mimeType = "") {
     .map((result) => result.value);
 
   if (!successes.length) {
-    throw new Error("No OCR engine could extract text from this survey image.");
+    const failures = results
+      .filter((result) => result.status === "rejected")
+      .map((result) => result.reason)
+      .filter(Boolean);
+    const onlyGeminiUnavailable =
+      failures.length > 0 && failures.every((error) => isRecoverableGeminiError(error));
+    const error = new Error(
+      onlyGeminiUnavailable
+        ? "OCR could not process this image right now because Gemini is unavailable and Tesseract could not extract readable text. Please try a clearer image or retry after Gemini quota/billing is restored."
+        : "No OCR engine could extract text from this survey image."
+    );
+    error.statusCode = onlyGeminiUnavailable ? 503 : 422;
+    throw error;
   }
 
   const primary = [...successes].sort((left, right) => {
@@ -3512,9 +3576,9 @@ async function runOCR(filePath, mimeType = "") {
     averageConfidence: Number(averageConfidence.toFixed(2)),
     provider:
       successes.length > 1
-        ? `${primary.provider} + ${secondary.provider || "Tesseract"}`
-        : primary.provider,
-    model: primary.model,
+        ? `${primary.provider || "OCR pipeline"} + ${secondary.provider || "Tesseract"}`
+        : primary.provider || "OCR pipeline",
+    model: primary.model || null,
     languagesDetected: uniqueValues([
       ...normalizeArray(primary.languagesDetected),
       ...normalizeArray(secondary.languagesDetected)
