@@ -1,7 +1,17 @@
 const fs = require("fs/promises");
+const fsSync = require("fs");
 const path = require("path");
-require("dotenv").config({ path: path.join(__dirname, "..", ".env") });
+const dotenv = require("dotenv");
 const { Pool } = require("pg");
+
+for (const envFilePath of [
+  path.join(__dirname, "..", ".env"),
+  path.join(__dirname, "..", "..", ".env")
+]) {
+  if (fsSync.existsSync(envFilePath)) {
+    dotenv.config({ path: envFilePath, override: false });
+  }
+}
 
 async function main() {
   const pool = new Pool({

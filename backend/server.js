@@ -13,6 +13,7 @@ const puppeteer = require("puppeteer");
 const { GoogleGenAI, createPartFromUri, createUserContent } = require("@google/genai");
 const twilio = require("twilio");
 const Tesseract = require("tesseract.js");
+const h3 = require("h3-js");
 const { Sequelize, DataTypes, Op } = require("sequelize");
 const {
   evaluateTaskStatus,
@@ -81,6 +82,13 @@ const GEMINI_AUDIO_MODEL = process.env.GEMINI_AUDIO_MODEL || "gemini-2.5-flash";
 const MAP_REFRESH_CENTER = { lat: 18.5204, lng: 73.8567 };
 const DB_CONNECTION_RETRY_ATTEMPTS = Number(process.env.DB_CONNECTION_RETRY_ATTEMPTS || 12);
 const DB_CONNECTION_RETRY_DELAY_MS = Number(process.env.DB_CONNECTION_RETRY_DELAY_MS || 2500);
+const DISPATCH_H3_RESOLUTION = Number(process.env.DISPATCH_H3_RESOLUTION || 8);
+const DISPATCH_DEFAULT_RADIUS_METERS = Number(process.env.DISPATCH_DEFAULT_RADIUS_METERS || 7500);
+const DISPATCH_ROUTE_TIMEOUT_MS = Number(process.env.DISPATCH_ROUTE_TIMEOUT_MS || 2500);
+const DISPATCH_AVERAGE_SPEED_KMPH = Number(process.env.DISPATCH_AVERAGE_SPEED_KMPH || 22);
+const ROUTING_ENGINE = String(process.env.ROUTING_ENGINE || "osrm").trim().toLowerCase();
+const ROUTING_ENGINE_URL = String(process.env.ROUTING_ENGINE_URL || "").replace(/\/+$/, "");
+const ROUTING_ENGINE_API_KEY = process.env.ROUTING_ENGINE_API_KEY || "";
 const HELPHIVE_LOGIN_DOMAIN = "@helphive.org";
 const LEGACY_LOGIN_DOMAIN = "@kindredpune.org";
 const ROLE_PAGE_FILES = [
@@ -818,6 +826,473 @@ function haversineKm(aLat, aLng, bLat, bLng) {
   return earthRadiusKm * c;
 }
 
+const spatialIndex = {
+  volunteersByCell: new Map(),
+  tasksByCell: new Map(),
+  volunteerCells: new Map(),
+  taskCells: new Map()
+};
+
+const volunteerNotificationStreams = new Map();
+const volunteerNotificationBacklog = new Map();
+
+function assertValidCoordinates(latitude, longitude, label = "location") {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    const error = new Error(`${label}.lat and ${label}.lng must be valid coordinates.`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  return { lat, lng };
+}
+
+function readLatLngFromBody(body = {}) {
+  const nested = body.location && typeof body.location === "object" ? body.location : {};
+  const latitude = body.latitude ?? body.lat ?? body.gps_lat ?? nested.latitude ?? nested.lat;
+  const longitude = body.longitude ?? body.lng ?? body.gps_lng ?? nested.longitude ?? nested.lng;
+  return assertValidCoordinates(latitude, longitude);
+}
+
+function cellForCoordinates(latitude, longitude) {
+  const { lat, lng } = assertValidCoordinates(latitude, longitude);
+  return h3.latLngToCell(lat, lng, DISPATCH_H3_RESOLUTION);
+}
+
+function setSpatialMembership({ kind, id, latitude, longitude, active = true }) {
+  const idValue = String(id);
+  const cellMap = kind === "volunteer" ? spatialIndex.volunteersByCell : spatialIndex.tasksByCell;
+  const reverseMap = kind === "volunteer" ? spatialIndex.volunteerCells : spatialIndex.taskCells;
+  const previousCell = reverseMap.get(idValue);
+
+  if (previousCell && cellMap.has(previousCell)) {
+    cellMap.get(previousCell).delete(idValue);
+    if (cellMap.get(previousCell).size === 0) {
+      cellMap.delete(previousCell);
+    }
+  }
+
+  if (!active) {
+    reverseMap.delete(idValue);
+    return null;
+  }
+
+  const cell = cellForCoordinates(latitude, longitude);
+  if (!cellMap.has(cell)) {
+    cellMap.set(cell, new Set());
+  }
+  cellMap.get(cell).add(idValue);
+  reverseMap.set(idValue, cell);
+  return cell;
+}
+
+function serializeSpatialIndex() {
+  const serializeMap = (map) =>
+    [...map.entries()].map(([cell, ids]) => ({
+      cell,
+      ids: [...ids]
+    }));
+
+  return {
+    grid: "h3",
+    resolution: DISPATCH_H3_RESOLUTION,
+    volunteersByCell: serializeMap(spatialIndex.volunteersByCell),
+    tasksByCell: serializeMap(spatialIndex.tasksByCell)
+  };
+}
+
+async function rebuildSpatialIndex() {
+  spatialIndex.volunteersByCell.clear();
+  spatialIndex.tasksByCell.clear();
+  spatialIndex.volunteerCells.clear();
+  spatialIndex.taskCells.clear();
+
+  const [volunteers, tasks] = await Promise.all([
+    Volunteer.findAll({ where: { isAvailable: true } }),
+    Task.findAll({ where: buildLiveTaskWhere() })
+  ]);
+
+  for (const volunteer of volunteers) {
+    const coords = pointToCoordinates(volunteer.location);
+    if (Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
+      setSpatialMembership({
+        kind: "volunteer",
+        id: volunteer.id,
+        latitude: coords.lat,
+        longitude: coords.lng,
+        active: true
+      });
+    }
+  }
+
+  for (const task of tasks) {
+    const coords = pointToCoordinates(task.location);
+    if (Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
+      setSpatialMembership({
+        kind: "task",
+        id: task.id,
+        latitude: coords.lat,
+        longitude: coords.lng,
+        active: !task.isAssigned
+      });
+    }
+  }
+}
+
+function routingFallback(taskCoords, volunteerCoords) {
+  const distanceKm = haversineKm(taskCoords.lat, taskCoords.lng, volunteerCoords.lat, volunteerCoords.lng);
+  const durationMinutes =
+    distanceKm === null
+      ? null
+      : Math.max(1, (distanceKm / Math.max(DISPATCH_AVERAGE_SPEED_KMPH, 1)) * 60);
+
+  return {
+    distanceMeters: distanceKm === null ? null : distanceKm * 1000,
+    durationSeconds: durationMinutes === null ? null : durationMinutes * 60,
+    provider: "haversine_fallback"
+  };
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = DISPATCH_ROUTE_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function computeRouteEstimate(taskCoords, volunteerCoords) {
+  if (!ROUTING_ENGINE_URL) {
+    return routingFallback(taskCoords, volunteerCoords);
+  }
+
+  try {
+    if (ROUTING_ENGINE === "graphhopper") {
+      const url = new URL(`${ROUTING_ENGINE_URL}/route`);
+      url.searchParams.append("point", `${volunteerCoords.lat},${volunteerCoords.lng}`);
+      url.searchParams.append("point", `${taskCoords.lat},${taskCoords.lng}`);
+      url.searchParams.set("profile", "car");
+      url.searchParams.set("locale", "en");
+      url.searchParams.set("calc_points", "false");
+      if (ROUTING_ENGINE_API_KEY) {
+        url.searchParams.set("key", ROUTING_ENGINE_API_KEY);
+      }
+
+      const response = await fetchWithTimeout(url);
+      if (!response.ok) {
+        throw new Error(`GraphHopper responded ${response.status}`);
+      }
+      const payload = await response.json();
+      const pathResult = payload.paths?.[0];
+      return {
+        distanceMeters: Number.isFinite(Number(pathResult?.distance)) ? Number(pathResult.distance) : null,
+        durationSeconds: Number.isFinite(Number(pathResult?.time)) ? Number(pathResult.time) / 1000 : null,
+        provider: "graphhopper"
+      };
+    }
+
+    const url = `${ROUTING_ENGINE_URL}/route/v1/driving/${volunteerCoords.lng},${volunteerCoords.lat};${taskCoords.lng},${taskCoords.lat}?overview=false`;
+    const response = await fetchWithTimeout(url);
+    if (!response.ok) {
+      throw new Error(`OSRM responded ${response.status}`);
+    }
+    const payload = await response.json();
+    const route = payload.routes?.[0];
+    return {
+      distanceMeters: Number.isFinite(Number(route?.distance)) ? Number(route.distance) : null,
+      durationSeconds: Number.isFinite(Number(route?.duration)) ? Number(route.duration) : null,
+      provider: "osrm"
+    };
+  } catch (error) {
+    console.warn(`Routing engine unavailable, using fallback ETA: ${error.message}`);
+    return routingFallback(taskCoords, volunteerCoords);
+  }
+}
+
+function scoreSkillMatch(requiredSkills = [], volunteer = {}) {
+  const required = normalizeArray(requiredSkills);
+  if (!required.length) {
+    return 1;
+  }
+
+  const volunteerSkills = getVolunteerSkillCorpus(volunteer).map(normalizeToken);
+  const matched = required.filter((skill) => volunteerSkills.includes(normalizeToken(skill)));
+  return matched.length / required.length;
+}
+
+function scoreLanguageMatch(requiredLanguages = [], volunteer = {}) {
+  const required = normalizeArray(requiredLanguages);
+  if (!required.length) {
+    return 1;
+  }
+
+  const volunteerLanguages = normalizeArray(volunteer.languages).map(normalizeToken);
+  const matched = required.filter((language) => volunteerLanguages.includes(normalizeToken(language)));
+  return matched.length / required.length;
+}
+
+function urgencyToScore(task = {}) {
+  const explicit = Number(task.urgencyScore ?? task.metadata?.urgencyScore);
+  if (Number.isFinite(explicit)) {
+    return Math.max(0, explicit);
+  }
+
+  const severityScores = { critical: 1, urgent: 0.7, stable: 0.35 };
+  return severityScores[task.severity] ?? 0.5;
+}
+
+function volunteerReliabilityScore(volunteer = {}) {
+  return Number(volunteer.user?.trustScore ?? volunteer.reliabilityScore ?? 0.5) || 0.5;
+}
+
+function dispatchScore({ task, volunteer, route }) {
+  const routeTimeSeconds = Math.max(Number(route.durationSeconds || 0), 60);
+  const skillMatchLevel = scoreSkillMatch(task.requiredSkills, volunteer);
+  const languageMatchLevel = scoreLanguageMatch(
+    normalizeArray(task.preferredLanguages).length ? task.preferredLanguages : preferredLanguagesForTask(task),
+    volunteer
+  );
+  const urgencyScore = urgencyToScore(task);
+  const reliabilityScore = volunteerReliabilityScore(volunteer);
+  const weights = { skill: 5, route: 180, urgency: 2, reliability: 2, language: 2 };
+  const score =
+    weights.skill * skillMatchLevel +
+    weights.route * (1 / routeTimeSeconds) +
+    weights.urgency * urgencyScore +
+    weights.reliability * reliabilityScore +
+    weights.language * languageMatchLevel;
+
+  return {
+    score,
+    skillMatchLevel,
+    languageMatchLevel,
+    urgencyScore,
+    reliabilityScore,
+    routeTimeSeconds,
+    routeDistanceMeters: route.distanceMeters,
+    routeProvider: route.provider
+  };
+}
+
+async function findAvailableVolunteersNear(location, radiusMeters = DISPATCH_DEFAULT_RADIUS_METERS, excludeVolunteerIds = []) {
+  const coords = assertValidCoordinates(location.lat, location.lng);
+  const excluded = new Set(excludeVolunteerIds.map(String));
+
+  if (!USE_POSTGIS) {
+    const volunteers = await Volunteer.findAll({
+      where: { isAvailable: true },
+      include: [{ model: User, as: "user", where: { role: "volunteer" } }]
+    });
+    return volunteers
+      .filter((volunteer) => !excluded.has(String(volunteer.id)))
+      .filter((volunteer) => {
+        const volunteerCoords = pointToCoordinates(volunteer.location);
+        const distanceKm = haversineKm(coords.lat, coords.lng, volunteerCoords.lat, volunteerCoords.lng);
+        return distanceKm !== null && distanceKm * 1000 <= radiusMeters;
+      });
+  }
+
+  const [rows] = await sequelize.query(
+    `
+      SELECT v.id
+      FROM volunteers v
+      JOIN users u ON u.id = v.user_id
+      WHERE u.role = 'volunteer'
+        AND v.is_available = TRUE
+        AND v.location IS NOT NULL
+        AND ST_DWithin(
+          v.location,
+          ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography,
+          $3
+        )
+      ORDER BY v.location <-> ST_SetSRID(ST_MakePoint($1, $2), 4326)::geography
+      LIMIT 50
+    `,
+    { bind: [coords.lng, coords.lat, radiusMeters] }
+  );
+
+  const ids = rows.map((row) => row.id).filter((id) => !excluded.has(String(id)));
+  if (!ids.length) {
+    return [];
+  }
+
+  return Volunteer.findAll({
+    where: { id: { [Op.in]: ids } },
+    include: [{ model: User, as: "user", where: { role: "volunteer" } }]
+  });
+}
+
+async function rankCandidatesForTask(task, options = {}) {
+  const taskCoords = pointToCoordinates(task.location);
+  const radiusMeters = Number(options.radiusMeters || DISPATCH_DEFAULT_RADIUS_METERS);
+  const excludedVolunteerIds = options.excludeVolunteerIds || [];
+  const candidates = await findAvailableVolunteersNear(taskCoords, radiusMeters, excludedVolunteerIds);
+  const ranked = [];
+
+  for (const volunteer of candidates) {
+    const volunteerCoords = pointToCoordinates(volunteer.location);
+    const route = await computeRouteEstimate(taskCoords, volunteerCoords);
+    const details = dispatchScore({ task, volunteer, route });
+    ranked.push({ volunteer, ...details });
+  }
+
+  return ranked.sort((left, right) => right.score - left.score);
+}
+
+function sendVolunteerNotification(volunteerId, payload) {
+  const id = String(volunteerId);
+  const event = {
+    id: createId("notification"),
+    createdAt: new Date().toISOString(),
+    ...payload
+  };
+  const backlog = volunteerNotificationBacklog.get(id) || [];
+  backlog.push(event);
+  volunteerNotificationBacklog.set(id, backlog.slice(-20));
+
+  for (const response of volunteerNotificationStreams.get(id) || []) {
+    response.write(`event: dispatch\n`);
+    response.write(`data: ${JSON.stringify(event)}\n\n`);
+  }
+
+  return event;
+}
+
+async function assignTaskToVolunteer({ task, rankedCandidate, mode = "auto_assign", transaction = null }) {
+  const volunteer = rankedCandidate.volunteer;
+  const [assignment] = await Assignment.findOrCreate({
+    where: { taskId: task.id, volunteerId: volunteer.id },
+    defaults: {
+      id: createId("assignment"),
+      taskId: task.id,
+      volunteerId: volunteer.id,
+      assignedAt: new Date(),
+      status: mode === "volunteer_choice" ? "active" : "pending",
+      matchScore: rankedCandidate.score
+    },
+    transaction
+  });
+
+  await assignment.update(
+    {
+      status: mode === "volunteer_choice" ? "active" : "pending",
+      matchScore: rankedCandidate.score,
+      assignedAt: new Date()
+    },
+    { transaction }
+  );
+
+  await task.update(
+    {
+      isAssigned: true,
+      status: mode === "volunteer_choice" ? TASK_STATUS.OPEN : TASK_STATUS.AUTO_ACCEPTED,
+      updatedAt: new Date()
+    },
+    { transaction }
+  );
+
+  await volunteer.update({ isAvailable: mode === "volunteer_choice" ? false : volunteer.isAvailable }, { transaction });
+
+  const taskCoords = pointToCoordinates(task.location);
+  setSpatialMembership({ kind: "task", id: task.id, latitude: taskCoords.lat, longitude: taskCoords.lng, active: false });
+
+  const notification = sendVolunteerNotification(volunteer.id, {
+    type: "task_assigned",
+    mode,
+    task: {
+      id: task.id,
+      title: task.title,
+      description: task.description,
+      requiredSkills: task.requiredSkills || [],
+      requiredLanguages: normalizeArray(task.preferredLanguages).length
+        ? task.preferredLanguages
+        : preferredLanguagesForTask(task),
+      urgencyScore: urgencyToScore(task),
+      location: taskCoords
+    },
+    score: Number(rankedCandidate.score.toFixed(3)),
+    routeTimeSeconds: rankedCandidate.routeTimeSeconds,
+    routeDistanceMeters: rankedCandidate.routeDistanceMeters,
+    routeProvider: rankedCandidate.routeProvider
+  });
+
+  return { assignment, notification };
+}
+
+async function dispatchTask(task, options = {}) {
+  const excludedVolunteerIds = new Set(options.excludeVolunteerIds || []);
+  const declinedRows = await Assignment.findAll({
+    where: {
+      taskId: task.id,
+      status: { [Op.in]: ["cancelled", "declined"] }
+    }
+  });
+  declinedRows.forEach((assignment) => excludedVolunteerIds.add(assignment.volunteerId));
+
+  const ranked = await rankCandidatesForTask(task, {
+    radiusMeters: options.radiusMeters,
+    excludeVolunteerIds: [...excludedVolunteerIds]
+  });
+
+  if (!ranked.length) {
+    return {
+      assigned: false,
+      candidates: [],
+      reason: "No available volunteers were found inside the dispatch radius."
+    };
+  }
+
+  const best = ranked[0];
+  const assignmentResult = await assignTaskToVolunteer({
+    task,
+    rankedCandidate: best,
+    mode: options.mode || "auto_assign"
+  });
+
+  return {
+    assigned: true,
+    volunteerId: best.volunteer.id,
+    volunteerUserId: best.volunteer.userId,
+    score: Number(best.score.toFixed(3)),
+    ranking: ranked.map((candidate) => ({
+      volunteerId: candidate.volunteer.id,
+      volunteerUserId: candidate.volunteer.userId,
+      score: Number(candidate.score.toFixed(3)),
+      skillMatchLevel: Number(candidate.skillMatchLevel.toFixed(3)),
+      languageMatchLevel: Number(candidate.languageMatchLevel.toFixed(3)),
+      reliabilityScore: Number(candidate.reliabilityScore.toFixed(3)),
+      routeTimeSeconds: Math.round(candidate.routeTimeSeconds),
+      routeDistanceMeters:
+        candidate.routeDistanceMeters === null ? null : Math.round(candidate.routeDistanceMeters),
+      routeProvider: candidate.routeProvider
+    })),
+    notification: assignmentResult.notification
+  };
+}
+
+/*
+Dispatch loop:
+onNewTask(task):
+  candidates = findAvailableVolunteersNear(task.location)
+  ranked = rankCandidatesForTask(candidates, task)
+  best = ranked[0] // highest hybrid score; partial skill matches remain eligible
+  assignTaskToVolunteer(best, task)
+  notifyVolunteer(best, task)
+
+Volunteer movement can call dispatchTask for nearby unassigned tasks after updating the
+volunteer's H3 cell and PostGIS point. The prototype returns candidate rematch hints
+from the location endpoint so a production worker can decide whether to auto-run them.
+
+Volunteer app UI notes:
+Auto-assign mode shows an incoming task sheet with task details, ETA, and one-tap
+Accept/Decline actions. Volunteer-choice mode shows GET /tasks/nearby results as a
+list or map sorted by route distance/urgency; selecting a task calls POST /tasks/{id}/accept.
+*/
+
 function buildToken(user) {
   return jwt.sign(
     {
@@ -1532,6 +2007,12 @@ const Volunteer = sequelize.define(
       defaultValue: "unknown",
       field: "vaccination_status"
     },
+    isAvailable: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
+      field: "is_available"
+    },
     location: {
       type: LOCATION_DATA_TYPE,
       allowNull: true
@@ -1795,6 +2276,17 @@ const Assignment = sequelize.define(
       allowNull: false,
       defaultValue: DataTypes.NOW,
       field: "assigned_at"
+    },
+    status: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "pending"
+    },
+    matchScore: {
+      type: DataTypes.DECIMAL(10, 3),
+      allowNull: false,
+      defaultValue: 0,
+      field: "match_score"
     }
   },
   {
@@ -2086,6 +2578,9 @@ async function ensureDatabase() {
     "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS vaccination_status VARCHAR(32) NOT NULL DEFAULT 'unknown';"
   );
   await sequelize.query(
+    "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS is_available BOOLEAN NOT NULL DEFAULT TRUE;"
+  );
+  await sequelize.query(
     "ALTER TABLE users ADD COLUMN IF NOT EXISTS trust_score FLOAT NOT NULL DEFAULT 0.5;"
   );
   await sequelize.query(
@@ -2141,6 +2636,38 @@ async function ensureDatabase() {
   );
   await sequelize.query(
     "CREATE TABLE IF NOT EXISTS task_confirmations (id SERIAL PRIMARY KEY, task_id VARCHAR REFERENCES tasks(id) ON DELETE CASCADE, reporter_id VARCHAR REFERENCES users(id) ON DELETE CASCADE, gps_lat DOUBLE PRECISION, gps_lng DOUBLE PRECISION, reported_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), UNIQUE(task_id, reporter_id));"
+  );
+  await sequelize.query(
+    "ALTER TABLE assignments ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT 'pending';"
+  );
+  await sequelize.query(
+    "ALTER TABLE assignments ADD COLUMN IF NOT EXISTS match_score NUMERIC(10, 3) NOT NULL DEFAULT 0;"
+  );
+  await sequelize.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'assignments_status_check'
+          AND conrelid = 'assignments'::regclass
+      ) THEN
+        ALTER TABLE assignments DROP CONSTRAINT assignments_status_check;
+      END IF;
+    END $$;
+  `);
+  await sequelize.query(
+    "ALTER TABLE assignments ADD CONSTRAINT assignments_status_check CHECK (status IN ('pending', 'active', 'completed', 'cancelled', 'declined')) NOT VALID;"
+  ).catch((error) => {
+    if (!/already exists/i.test(error.message)) {
+      throw error;
+    }
+  });
+  await sequelize.query(
+    "CREATE INDEX IF NOT EXISTS assignments_task_status_idx ON assignments (task_id, status);"
+  );
+  await sequelize.query(
+    "CREATE INDEX IF NOT EXISTS volunteers_available_idx ON volunteers (is_available);"
   );
   await sequelize.query(
     `UPDATE tasks SET status = '${TASK_STATUS.COMPLETED}' WHERE completed_at IS NOT NULL;`
@@ -2587,6 +3114,9 @@ async function buildTaskPayload(task, currentUser = null) {
     createdAt: taskWithRelations.createdAt,
     updatedAt: taskWithRelations.updatedAt,
     confirmationCount: taskWithRelations.confirmationCount,
+    gpsLat: taskWithRelations.gpsLat,
+    gpsLng: taskWithRelations.gpsLng,
+    contentHash: taskWithRelations.contentHash || null,
     mediaUrl: taskWithRelations.mediaUrl || null,
     reportedAt: taskWithRelations.reportedAt || null,
     completedAt: taskWithRelations.completedAt,
@@ -2694,6 +3224,66 @@ async function createTaskRecord({
   }, { transaction });
 }
 
+async function createDispatchTaskFromRequest(body = {}, reporter) {
+  const coords = readLatLngFromBody(body);
+  const description = String(body.description || body.notes || "").trim();
+  const type = normalizeNeedType(body.type || body.category || "", description);
+  const severity = normalizeSeverity(body.severity || body.urgency);
+  const locationName = String(body.locationName || body.location_name || "Pinned location").trim();
+  const requiredSkills = normalizeArray(body.requiredSkills || body.required_skills);
+  const requiredLanguages = normalizeArray(body.requiredLanguages || body.required_languages);
+  const taskContext = buildTaskRoutingProfile({
+    type,
+    severity,
+    description,
+    locationName,
+    requiredSkills,
+    preferredLanguages: requiredLanguages,
+    category: body.category
+  });
+  const ngoDesk =
+    reporter.role === "ngo" || reporter.role === "admin"
+      ? reporter
+      : (await User.findOne({ where: { role: "ngo" }, order: [["name", "ASC"]] })) ||
+        (await User.findOne({ where: { role: "admin" }, order: [["name", "ASC"]] })) ||
+        reporter;
+
+  const task = await createTaskRecord({
+    ngoUserId: ngoDesk.id,
+    source: String(body.source || "dispatch_api"),
+    status: TASK_STATUS.OPEN,
+    description: description || String(body.title || "Volunteer dispatch task").trim(),
+    title: String(body.title || "").trim() || buildTaskTitle(type, locationName),
+    type,
+    severity,
+    locationName,
+    latitude: coords.lat,
+    longitude: coords.lng,
+    requiredSkills: taskContext.requiredSkills,
+    complementarySkills: taskContext.complementarySkills,
+    preferredLanguages: taskContext.preferredLanguages,
+    preferredCommunicationStyles: taskContext.preferredCommunicationStyles,
+    contextTags: taskContext.contextTags,
+    minimumMedicalTraining: taskContext.minimumMedicalTraining,
+    category: taskContext.category,
+    timeWindows: taskContext.timeWindows,
+    peopleServed: inferPeopleServed(type, severity),
+    gpsLat: coords.lat,
+    gpsLng: coords.lng,
+    reportedAt: body.createdAt ? new Date(body.createdAt) : new Date(),
+    confirmationCount: Number(body.confirmationCount || 1) || 1
+  });
+  const cell = setSpatialMembership({
+    kind: "task",
+    id: task.id,
+    latitude: coords.lat,
+    longitude: coords.lng,
+    active: true
+  });
+
+  return { task, cell };
+}
+
 function validateVerificationBody(body = {}) {
   const gpsLat = Number(body.gps_lat);
   const gpsLng = Number(body.gps_lng);
@@ -2798,8 +3388,8 @@ async function insertTaskConfirmation({
 
   const [inserted] = await sequelize.query(
     `
-      INSERT INTO task_confirmations (task_id, reporter_id, gps_lat, gps_lng)
-      VALUES ($1, $2, $3, $4)
+      INSERT INTO task_confirmations (task_id, reporter_id, gps_lat, gps_lng, reported_at)
+      VALUES ($1, $2, $3, $4, NOW())
       ON CONFLICT (task_id, reporter_id) DO NOTHING
       RETURNING id
     `,
@@ -4427,8 +5017,50 @@ app.get("/api/tasks", requireAuth, async (request, response, next) => {
 
 app.post(["/api/tasks", "/tasks"], requireAuth, async (request, response, next) => {
   try {
-    const task = await createOrConfirmVerifiedTask(request.body, request.user);
-    response.status(201).json({ task: await buildTaskPayload(task, request.user) });
+    const hasVerificationFields = [
+      "gps_lat",
+      "gps_lng",
+      "device_timestamp",
+      "media_url"
+    ].some((field) => request.body[field] !== undefined);
+    const hasDispatchLocation = Boolean(
+      request.body.location ||
+        request.body.latitude !== undefined ||
+        request.body.lat !== undefined
+    );
+
+    if (hasVerificationFields || !hasDispatchLocation) {
+      const task = await createOrConfirmVerifiedTask(request.body, request.user);
+      const taskCoords = pointToCoordinates(task.location);
+      if (Number.isFinite(taskCoords.lat) && Number.isFinite(taskCoords.lng)) {
+        setSpatialMembership({
+          kind: "task",
+          id: task.id,
+          latitude: taskCoords.lat,
+          longitude: taskCoords.lng,
+          active: task.status === TASK_STATUS.OPEN && !task.isAssigned
+        });
+      }
+      const dispatch =
+        task.status === TASK_STATUS.OPEN && !task.isAssigned
+          ? await dispatchTask(task, { mode: "auto_assign" })
+          : null;
+      response.status(201).json({ task: await buildTaskPayload(task, request.user), dispatch });
+      return;
+    }
+
+    const { task, cell } = await createDispatchTaskFromRequest(request.body, request.user);
+    const dispatch = await dispatchTask(task, {
+      mode: String(request.body.assignmentMode || request.body.mode || "auto_assign") === "volunteer_choice"
+        ? "volunteer_choice"
+        : "auto_assign",
+      radiusMeters: request.body.radiusMeters || request.body.radius_meters
+    });
+    response.status(201).json({
+      task: await buildTaskPayload(task, request.user),
+      dispatch,
+      spatial: { grid: "h3", cell, resolution: DISPATCH_H3_RESOLUTION }
+    });
   } catch (error) {
     next(error);
   }
@@ -4589,6 +5221,364 @@ app.get("/api/alerts", requireAuth, async (request, response, next) => {
   }
 });
 
+app.get(["/api/dispatch/spatial-index", "/dispatch/spatial-index"], requireAuth, requireRole(["admin"]), async (request, response) => {
+  response.json(serializeSpatialIndex());
+});
+
+app.get(
+  ["/api/volunteers/:id/notifications", "/volunteers/:id/notifications"],
+  requireAuth,
+  requireRole(["volunteer", "admin"]),
+  async (request, response, next) => {
+    try {
+      const volunteer = await Volunteer.findOne({
+        where: {
+          [Op.or]: [{ id: request.params.id }, { userId: request.params.id }]
+        }
+      });
+
+      if (!volunteer) {
+        response.status(404).json({ error: "Volunteer not found." });
+        return;
+      }
+
+      if (request.user.role !== "admin" && volunteer.userId !== request.user.id) {
+        response.status(403).json({ error: "You cannot subscribe to this volunteer stream." });
+        return;
+      }
+
+      response.setHeader("Content-Type", "text/event-stream");
+      response.setHeader("Cache-Control", "no-cache");
+      response.setHeader("Connection", "keep-alive");
+      response.flushHeaders?.();
+
+      const key = String(volunteer.id);
+      const streams = volunteerNotificationStreams.get(key) || new Set();
+      streams.add(response);
+      volunteerNotificationStreams.set(key, streams);
+
+      response.write(`event: ready\n`);
+      response.write(`data: ${JSON.stringify({ volunteerId: volunteer.id })}\n\n`);
+      for (const event of volunteerNotificationBacklog.get(key) || []) {
+        response.write(`event: dispatch\n`);
+        response.write(`data: ${JSON.stringify(event)}\n\n`);
+      }
+
+      request.on("close", () => {
+        const activeStreams = volunteerNotificationStreams.get(key);
+        if (!activeStreams) {
+          return;
+        }
+        activeStreams.delete(response);
+        if (activeStreams.size === 0) {
+          volunteerNotificationStreams.delete(key);
+        }
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+app.post(
+  ["/api/volunteers/:id/location", "/volunteers/:id/location"],
+  requireAuth,
+  requireRole(["volunteer", "admin"]),
+  async (request, response, next) => {
+    try {
+      const coords = readLatLngFromBody(request.body);
+      const volunteer = await Volunteer.findOne({
+        include: [{ model: User, as: "user" }],
+        where: {
+          [Op.or]: [{ id: request.params.id }, { userId: request.params.id }]
+        }
+      });
+
+      if (!volunteer) {
+        response.status(404).json({ error: "Volunteer not found." });
+        return;
+      }
+
+      if (request.user.role !== "admin" && volunteer.userId !== request.user.id) {
+        response.status(403).json({ error: "You cannot update this volunteer location." });
+        return;
+      }
+
+      const requestedStatus = String(request.body.status || "").trim().toLowerCase();
+      const isAvailable =
+        requestedStatus === "busy"
+          ? false
+          : requestedStatus === "available"
+            ? true
+            : request.body.isAvailable === undefined
+              ? volunteer.isAvailable
+              : Boolean(request.body.isAvailable);
+
+      await volunteer.update({
+        location: pointFromCoordinates(coords.lat, coords.lng),
+        isAvailable
+      });
+
+      const cell = setSpatialMembership({
+        kind: "volunteer",
+        id: volunteer.id,
+        latitude: coords.lat,
+        longitude: coords.lng,
+        active: isAvailable
+      });
+
+      let rematch = null;
+      if (isAvailable && request.body.autoDispatch === true) {
+        const nearbyTasks = await Task.findAll({
+          where: buildLiveTaskWhere({ isAssigned: false }),
+          limit: 5,
+          order: [["updatedAt", "DESC"]]
+        });
+        const dispatched = [];
+        for (const task of nearbyTasks) {
+          const taskCoords = pointToCoordinates(task.location);
+          const distanceKm = haversineKm(coords.lat, coords.lng, taskCoords.lat, taskCoords.lng);
+          if (distanceKm !== null && distanceKm * 1000 <= DISPATCH_DEFAULT_RADIUS_METERS) {
+            dispatched.push({ taskId: task.id, result: await dispatchTask(task) });
+          }
+        }
+        rematch = dispatched;
+      }
+
+      response.json({
+        volunteer: {
+          id: volunteer.id,
+          userId: volunteer.userId,
+          status: isAvailable ? "available" : "busy",
+          location: coords
+        },
+        spatial: { grid: "h3", cell, resolution: DISPATCH_H3_RESOLUTION },
+        rematch
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+app.get(["/api/tasks/nearby", "/tasks/nearby"], requireAuth, requireRole(["volunteer", "admin"]), async (request, response, next) => {
+  try {
+    const volunteer =
+      request.user.role === "admin" && request.query.volunteerId
+        ? await Volunteer.findOne({
+            where: {
+              [Op.or]: [{ id: request.query.volunteerId }, { userId: request.query.volunteerId }]
+            },
+            include: [{ model: User, as: "user" }]
+          })
+        : await ensureVolunteerProfileForUser(request.user.id);
+
+    if (!volunteer) {
+      response.status(404).json({ error: "Volunteer not found." });
+      return;
+    }
+
+    const volunteerCoords = pointToCoordinates(volunteer.location);
+    assertValidCoordinates(volunteerCoords.lat, volunteerCoords.lng, "volunteer.location");
+    const radiusMeters = Number(request.query.radiusMeters || request.query.radius_meters || DISPATCH_DEFAULT_RADIUS_METERS);
+    const sort = String(request.query.sort || "distance").toLowerCase();
+    let tasks;
+
+    if (USE_POSTGIS) {
+      const [rows] = await sequelize.query(
+        `
+          SELECT id
+          FROM tasks
+          WHERE status = $1
+            AND completed_at IS NULL
+            AND is_assigned = FALSE
+            AND location IS NOT NULL
+            AND ST_DWithin(
+              location,
+              ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
+              $4
+            )
+          ORDER BY location <-> ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography
+          LIMIT 100
+        `,
+        { bind: [TASK_STATUS.OPEN, volunteerCoords.lng, volunteerCoords.lat, radiusMeters] }
+      );
+      tasks = rows.length
+        ? await Task.findAll({ where: { id: { [Op.in]: rows.map((row) => row.id) } }, include: [{ model: User, as: "ngo" }] })
+        : [];
+    } else {
+      tasks = await Task.findAll({ where: buildLiveTaskWhere({ isAssigned: false }), include: [{ model: User, as: "ngo" }] });
+      tasks = tasks.filter((task) => {
+        const taskCoords = pointToCoordinates(task.location);
+        const distanceKm = haversineKm(volunteerCoords.lat, volunteerCoords.lng, taskCoords.lat, taskCoords.lng);
+        return distanceKm !== null && distanceKm * 1000 <= radiusMeters;
+      });
+    }
+
+    const visibleTasks = [];
+    for (const task of tasks) {
+      const skillMatchLevel = scoreSkillMatch(task.requiredSkills, volunteer);
+      const languageMatchLevel = scoreLanguageMatch(
+        normalizeArray(task.preferredLanguages).length ? task.preferredLanguages : preferredLanguagesForTask(task),
+        volunteer
+      );
+      if (skillMatchLevel <= 0 && languageMatchLevel <= 0) {
+        continue;
+      }
+
+      const taskCoords = pointToCoordinates(task.location);
+      const route = await computeRouteEstimate(taskCoords, volunteerCoords);
+      visibleTasks.push({
+        task,
+        skillMatchLevel,
+        languageMatchLevel,
+        route,
+        distanceMeters: route.distanceMeters,
+        urgencyScore: urgencyToScore(task)
+      });
+    }
+
+    visibleTasks.sort((left, right) => {
+      if (sort === "urgency") {
+        const urgencyDelta = right.urgencyScore - left.urgencyScore;
+        if (urgencyDelta !== 0) {
+          return urgencyDelta;
+        }
+      }
+      return Number(left.distanceMeters || Infinity) - Number(right.distanceMeters || Infinity);
+    });
+
+    response.json({
+      tasks: await Promise.all(
+        visibleTasks.map(async (entry) => ({
+          ...(await buildTaskPayload(entry.task, request.user)),
+          match: {
+            skillMatchLevel: Number(entry.skillMatchLevel.toFixed(3)),
+            languageMatchLevel: Number(entry.languageMatchLevel.toFixed(3)),
+            routeTimeSeconds:
+              entry.route.durationSeconds === null ? null : Math.round(entry.route.durationSeconds),
+            routeDistanceMeters:
+              entry.route.distanceMeters === null ? null : Math.round(entry.route.distanceMeters),
+            routeProvider: entry.route.provider
+          }
+        }))
+      )
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post(["/api/tasks/:id/accept", "/tasks/:id/accept"], requireAuth, requireRole(["volunteer", "admin"]), async (request, response, next) => {
+  try {
+    const task = await Task.findByPk(request.params.id);
+    if (!task) {
+      response.status(404).json({ error: "Task not found." });
+      return;
+    }
+
+    const volunteer =
+      request.user.role === "admin" && request.body.volunteerId
+        ? await Volunteer.findOne({ where: { [Op.or]: [{ id: request.body.volunteerId }, { userId: request.body.volunteerId }] } })
+        : await ensureVolunteerProfileForUser(request.user.id);
+
+    if (!volunteer) {
+      response.status(404).json({ error: "Volunteer not found." });
+      return;
+    }
+
+    let assignment = await Assignment.findOne({ where: { taskId: task.id, volunteerId: volunteer.id } });
+    if (!assignment) {
+      const taskCoords = pointToCoordinates(task.location);
+      const volunteerCoords = pointToCoordinates(volunteer.location);
+      const route = await computeRouteEstimate(taskCoords, volunteerCoords);
+      const score = dispatchScore({ task, volunteer, route });
+      const assigned = await assignTaskToVolunteer({
+        task,
+        rankedCandidate: { volunteer, ...score },
+        mode: "volunteer_choice"
+      });
+      assignment = assigned.assignment;
+    } else {
+      await assignment.update({
+        status: "active",
+        assignedAt: new Date()
+      });
+      await Promise.all([
+        task.update({ isAssigned: true, status: TASK_STATUS.OPEN, updatedAt: new Date() }),
+        volunteer.update({ isAvailable: false })
+      ]);
+    }
+
+    const taskCoords = pointToCoordinates(task.location);
+    setSpatialMembership({ kind: "task", id: task.id, latitude: taskCoords.lat, longitude: taskCoords.lng, active: false });
+    setSpatialMembership({ kind: "volunteer", id: volunteer.id, latitude: pointToCoordinates(volunteer.location).lat, longitude: pointToCoordinates(volunteer.location).lng, active: false });
+    sendVolunteerNotification(volunteer.id, { type: "task_acceptance_recorded", taskId: task.id, assignmentId: assignment.id });
+
+    response.json({
+      task: await buildTaskPayload(await Task.findByPk(task.id), request.user),
+      assignment: {
+        id: assignment.id,
+        taskId: assignment.taskId,
+        volunteerId: assignment.volunteerId,
+        status: "active"
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post(["/api/tasks/:id/decline", "/tasks/:id/decline"], requireAuth, requireRole(["volunteer", "admin"]), async (request, response, next) => {
+  try {
+    const task = await Task.findByPk(request.params.id);
+    if (!task) {
+      response.status(404).json({ error: "Task not found." });
+      return;
+    }
+
+    const volunteer =
+      request.user.role === "admin" && request.body.volunteerId
+        ? await Volunteer.findOne({ where: { [Op.or]: [{ id: request.body.volunteerId }, { userId: request.body.volunteerId }] } })
+        : await ensureVolunteerProfileForUser(request.user.id);
+
+    if (!volunteer) {
+      response.status(404).json({ error: "Volunteer not found." });
+      return;
+    }
+
+    const assignment = await Assignment.findOne({ where: { taskId: task.id, volunteerId: volunteer.id } });
+    if (assignment) {
+      await assignment.update({ status: "declined" });
+    }
+
+    const remaining = await Assignment.count({
+      where: {
+        taskId: task.id,
+        status: { [Op.in]: ["pending", "active"] }
+      }
+    });
+
+    if (!remaining) {
+      const coords = pointToCoordinates(task.location);
+      await task.update({ isAssigned: false, status: TASK_STATUS.OPEN, updatedAt: new Date() });
+      setSpatialMembership({ kind: "task", id: task.id, latitude: coords.lat, longitude: coords.lng, active: true });
+    }
+
+    sendVolunteerNotification(volunteer.id, { type: "task_decline_recorded", taskId: task.id });
+    const rematch = await dispatchTask(task, { excludeVolunteerIds: [volunteer.id] });
+
+    response.json({
+      declined: true,
+      taskId: task.id,
+      volunteerId: volunteer.id,
+      rematch
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/tasks/:id/volunteer", requireAuth, requireRole(["volunteer", "admin"]), async (request, response, next) => {
   try {
     const task = await Task.findByPk(request.params.id);
@@ -4620,14 +5610,39 @@ app.post("/api/tasks/:id/volunteer", requireAuth, requireRole(["volunteer", "adm
         id: createId("assignment"),
         taskId: task.id,
         volunteerId: volunteerProfile.id,
+        assignedAt: new Date(),
+        status: "active",
+        matchScore: computeMatchScore(task, volunteerProfile).score
+      });
+    } else {
+      await existingAssignment.update({
+        status: "active",
         assignedAt: new Date()
       });
     }
 
-    await task.update({
-      isAssigned: true,
-      updatedAt: new Date()
-    });
+    await Promise.all([
+      task.update({
+        isAssigned: true,
+        updatedAt: new Date()
+      }),
+      volunteerProfile.update({ isAvailable: false })
+    ]);
+
+    const taskCoords = pointToCoordinates(task.location);
+    const volunteerCoords = pointToCoordinates(volunteerProfile.location);
+    if (Number.isFinite(taskCoords.lat) && Number.isFinite(taskCoords.lng)) {
+      setSpatialMembership({ kind: "task", id: task.id, latitude: taskCoords.lat, longitude: taskCoords.lng, active: false });
+    }
+    if (Number.isFinite(volunteerCoords.lat) && Number.isFinite(volunteerCoords.lng)) {
+      setSpatialMembership({
+        kind: "volunteer",
+        id: volunteerProfile.id,
+        latitude: volunteerCoords.lat,
+        longitude: volunteerCoords.lng,
+        active: false
+      });
+    }
 
     const refreshedTask = await Task.findByPk(task.id, {
       include: [
@@ -5271,6 +6286,7 @@ async function initializeApp() {
   await ensureDirectories();
   await ensureDatabase();
   await seedDatabase();
+  await rebuildSpatialIndex();
 }
 
 initializeApp()
