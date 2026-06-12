@@ -14,6 +14,10 @@ const { GoogleGenAI, createPartFromUri, createUserContent } = require("@google/g
 const twilio = require("twilio");
 const Tesseract = require("tesseract.js");
 const { Sequelize, DataTypes, Op } = require("sequelize");
+const {
+  evaluateTaskStatus,
+  updateTrustScore
+} = require("./services/trustService");
 
 const ENV_FILE_CANDIDATES = [
   path.join(__dirname, ".env"),
@@ -342,7 +346,10 @@ const TASK_STATUS = {
   OPEN: "open",
   PENDING_REVIEW: "pending_review",
   REJECTED: "rejected",
-  COMPLETED: "completed"
+  COMPLETED: "completed",
+  PENDING: "pending",
+  CONFIRMED: "confirmed",
+  AUTO_ACCEPTED: "auto_accepted"
 };
 
 const LOCALITY_INDEX = {
@@ -1421,6 +1428,24 @@ const User = sequelize.define(
       type: DataTypes.STRING,
       allowNull: true,
       field: "company_id"
+    },
+    trustScore: {
+      type: DataTypes.FLOAT,
+      allowNull: false,
+      defaultValue: 0.5,
+      field: "trust_score"
+    },
+    reportsTotal: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      field: "reports_total"
+    },
+    reportsConfirmed: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+      field: "reports_confirmed"
     }
   },
   {
@@ -1660,12 +1685,91 @@ const Task = sequelize.define(
       type: DataTypes.DATE,
       allowNull: true,
       field: "rejected_at"
+    },
+    confirmationCount: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 1,
+      field: "confirmation_count"
+    },
+    gpsLat: {
+      type: DataTypes.DOUBLE,
+      allowNull: true,
+      field: "gps_lat"
+    },
+    gpsLng: {
+      type: DataTypes.DOUBLE,
+      allowNull: true,
+      field: "gps_lng"
+    },
+    reportedAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+      field: "reported_at"
+    },
+    mediaUrl: {
+      type: DataTypes.TEXT,
+      allowNull: true,
+      field: "media_url"
+    },
+    contentHash: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: "content_hash"
     }
   },
   {
     tableName: "tasks",
     createdAt: "created_at",
     updatedAt: "updated_at"
+  }
+);
+
+const TaskConfirmation = sequelize.define(
+  "TaskConfirmation",
+  {
+    id: {
+      type: DataTypes.INTEGER,
+      primaryKey: true,
+      autoIncrement: true
+    },
+    taskId: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      field: "task_id"
+    },
+    reporterId: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      field: "reporter_id"
+    },
+    gpsLat: {
+      type: DataTypes.DOUBLE,
+      allowNull: true,
+      field: "gps_lat"
+    },
+    gpsLng: {
+      type: DataTypes.DOUBLE,
+      allowNull: true,
+      field: "gps_lng"
+    },
+    reportedAt: {
+      type: DataTypes.DATE,
+      allowNull: false,
+      defaultValue: DataTypes.NOW,
+      field: "reported_at"
+    }
+  },
+  {
+    tableName: "task_confirmations",
+    timestamps: false,
+    indexes: [
+      {
+        unique: true,
+        fields: ["task_id", "reporter_id"]
+      }
+    ]
   }
 );
 
@@ -1915,6 +2019,12 @@ User.hasMany(Task, { foreignKey: "ngo_id", as: "ngoTasks" });
 Task.belongsTo(Company, { foreignKey: "company_id", as: "company" });
 Company.hasMany(Task, { foreignKey: "company_id", as: "tasks" });
 
+TaskConfirmation.belongsTo(Task, { foreignKey: "task_id", as: "task" });
+Task.hasMany(TaskConfirmation, { foreignKey: "task_id", as: "confirmations" });
+
+TaskConfirmation.belongsTo(User, { foreignKey: "reporter_id", as: "reporter" });
+User.hasMany(TaskConfirmation, { foreignKey: "reporter_id", as: "taskConfirmations" });
+
 Assignment.belongsTo(Task, { foreignKey: "task_id", as: "task" });
 Task.hasMany(Assignment, { foreignKey: "task_id", as: "assignments" });
 
@@ -1976,6 +2086,15 @@ async function ensureDatabase() {
     "ALTER TABLE volunteers ADD COLUMN IF NOT EXISTS vaccination_status VARCHAR(32) NOT NULL DEFAULT 'unknown';"
   );
   await sequelize.query(
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS trust_score FLOAT NOT NULL DEFAULT 0.5;"
+  );
+  await sequelize.query(
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS reports_total INT NOT NULL DEFAULT 0;"
+  );
+  await sequelize.query(
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS reports_confirmed INT NOT NULL DEFAULT 0;"
+  );
+  await sequelize.query(
     "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS complementary_skills TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
   );
   await sequelize.query(
@@ -2001,6 +2120,27 @@ async function ensureDatabase() {
   );
   await sequelize.query(
     "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP WITH TIME ZONE;"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS confirmation_count INT NOT NULL DEFAULT 1;"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS gps_lat DOUBLE PRECISION;"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS gps_lng DOUBLE PRECISION;"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS reported_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW();"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS media_url TEXT;"
+  );
+  await sequelize.query(
+    "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS content_hash VARCHAR;"
+  );
+  await sequelize.query(
+    "CREATE TABLE IF NOT EXISTS task_confirmations (id SERIAL PRIMARY KEY, task_id VARCHAR REFERENCES tasks(id) ON DELETE CASCADE, reporter_id VARCHAR REFERENCES users(id) ON DELETE CASCADE, gps_lat DOUBLE PRECISION, gps_lng DOUBLE PRECISION, reported_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), UNIQUE(task_id, reporter_id));"
   );
   await sequelize.query(
     `UPDATE tasks SET status = '${TASK_STATUS.COMPLETED}' WHERE completed_at IS NOT NULL;`
@@ -2432,6 +2572,8 @@ async function buildTaskPayload(task, currentUser = null) {
         ? TASK_STATUS.PENDING_REVIEW
         : taskWithRelations.status === TASK_STATUS.REJECTED
           ? TASK_STATUS.REJECTED
+          : [TASK_STATUS.PENDING, TASK_STATUS.CONFIRMED, TASK_STATUS.AUTO_ACCEPTED].includes(taskWithRelations.status)
+            ? taskWithRelations.status
           : taskWithRelations.completedAt || taskWithRelations.status === TASK_STATUS.COMPLETED
             ? TASK_STATUS.COMPLETED
             : taskWithRelations.isAssigned
@@ -2444,6 +2586,9 @@ async function buildTaskPayload(task, currentUser = null) {
     sponsorCompanyId: taskWithRelations.companyId || null,
     createdAt: taskWithRelations.createdAt,
     updatedAt: taskWithRelations.updatedAt,
+    confirmationCount: taskWithRelations.confirmationCount,
+    mediaUrl: taskWithRelations.mediaUrl || null,
+    reportedAt: taskWithRelations.reportedAt || null,
     completedAt: taskWithRelations.completedAt,
     notes: taskWithRelations.description,
     ngo: taskWithRelations.ngo?.name || "NGO Desk",
@@ -2493,7 +2638,14 @@ async function createTaskRecord({
   minimumMedicalTraining = "none",
   category = "",
   timeWindows = [],
-  peopleServed = 0
+  peopleServed = 0,
+  gpsLat = null,
+  gpsLng = null,
+  reportedAt = null,
+  mediaUrl = null,
+  contentHash = null,
+  confirmationCount = 1,
+  transaction = null
 }) {
   const routingProfile = buildTaskRoutingProfile({
     type,
@@ -2532,7 +2684,216 @@ async function createTaskRecord({
     location: pointFromCoordinates(latitude, longitude),
     isAssigned: false,
     status: normalizeTaskStatus(status, TASK_STATUS.OPEN),
-    rejectedAt: null
+    rejectedAt: null,
+    confirmationCount,
+    gpsLat,
+    gpsLng,
+    reportedAt: reportedAt || new Date(),
+    mediaUrl,
+    contentHash
+  }, { transaction });
+}
+
+function validateVerificationBody(body = {}) {
+  const gpsLat = Number(body.gps_lat);
+  const gpsLng = Number(body.gps_lng);
+  const deviceTimestamp = String(body.device_timestamp || "").trim();
+
+  if (!Number.isFinite(gpsLat) || !Number.isFinite(gpsLng) || !deviceTimestamp) {
+    return {
+      error: "gps_lat, gps_lng, and device_timestamp are required.",
+      gpsLat,
+      gpsLng,
+      deviceTimestamp
+    };
+  }
+
+  if (gpsLat < -90 || gpsLat > 90 || gpsLng < -180 || gpsLng > 180) {
+    return {
+      error: "gps_lat and gps_lng must be valid coordinates.",
+      gpsLat,
+      gpsLng,
+      deviceTimestamp
+    };
+  }
+
+  return { gpsLat, gpsLng, deviceTimestamp };
+}
+
+function buildContentHash({ reporterId, gpsLat, gpsLng, deviceTimestamp, mediaUrl = "" }) {
+  return crypto
+    .createHash("sha256")
+    .update(`${reporterId}${gpsLat}${gpsLng}${deviceTimestamp}${mediaUrl || ""}`)
+    .digest("hex");
+}
+
+async function findNearbyTaskForVerification({ category, gpsLat, gpsLng, transaction }) {
+  if (!USE_POSTGIS) {
+    return null;
+  }
+
+  const [matches] = await sequelize.query(
+    `
+      SELECT id, ngo_id, confirmation_count, status
+      FROM tasks
+      WHERE category = $1
+        AND status IN ($2, $3)
+        AND reported_at >= NOW() - INTERVAL '2 hours'
+        AND location IS NOT NULL
+        AND ST_DWithin(
+          location,
+          ST_SetSRID(ST_MakePoint($4, $5), 4326)::geography,
+          100
+        )
+      ORDER BY reported_at DESC
+      LIMIT 1
+      FOR UPDATE
+    `,
+    {
+      bind: [category, TASK_STATUS.PENDING, TASK_STATUS.CONFIRMED, gpsLng, gpsLat],
+      transaction
+    }
+  );
+
+  return matches[0] || null;
+}
+
+async function refreshVerificationStatus(taskId, reporter, transaction) {
+  const task = await Task.findByPk(taskId, { transaction });
+  if (!task) {
+    return null;
+  }
+
+  const nextStatus = evaluateTaskStatus(task.get({ plain: true }), reporter.get({ plain: true }));
+  await task.update({ status: nextStatus, updatedAt: new Date() }, { transaction });
+  return Task.findByPk(taskId, {
+    include: [{ model: User, as: "ngo" }],
+    transaction
+  });
+}
+
+async function insertTaskConfirmation({
+  taskId,
+  reporterId,
+  gpsLat,
+  gpsLng,
+  transaction,
+  conflictIsError = false
+}) {
+  const task = await Task.findByPk(taskId, { transaction });
+  if (!task) {
+    const error = new Error("Task not found.");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (task.ngoId === reporterId) {
+    if (conflictIsError) {
+      const error = new Error("You have already confirmed this task.");
+      error.statusCode = 409;
+      throw error;
+    }
+    return { inserted: false, task };
+  }
+
+  const [inserted] = await sequelize.query(
+    `
+      INSERT INTO task_confirmations (task_id, reporter_id, gps_lat, gps_lng)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT (task_id, reporter_id) DO NOTHING
+      RETURNING id
+    `,
+    {
+      bind: [taskId, reporterId, gpsLat, gpsLng],
+      transaction
+    }
+  );
+
+  if (!inserted.length) {
+    if (conflictIsError) {
+      const error = new Error("You have already confirmed this task.");
+      error.statusCode = 409;
+      throw error;
+    }
+    return { inserted: false, task };
+  }
+
+  await task.increment("confirmationCount", { by: 1, transaction });
+  await task.reload({ transaction });
+  return { inserted: true, task };
+}
+
+async function createOrConfirmVerifiedTask(body, reporter) {
+  const validation = validateVerificationBody(body);
+  if (validation.error) {
+    const error = new Error(validation.error);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const description = String(body.description || body.notes || "").trim();
+  const title = String(body.title || "").trim() || "Community need report";
+  const type = normalizeNeedType(body.type || body.category || "", description);
+  const severity = normalizeSeverity(body.severity);
+  const locationName = String(body.location_name || body.locationName || "Pinned location").trim();
+  const mediaUrl = body.media_url ? String(body.media_url).trim() : null;
+  const routingProfile = buildTaskRoutingProfile({
+    type,
+    severity,
+    description,
+    locationName,
+    requiredSkills: body.required_skills || body.requiredSkills,
+    category: body.category
+  });
+  const contentHash = buildContentHash({
+    reporterId: reporter.id,
+    gpsLat: validation.gpsLat,
+    gpsLng: validation.gpsLng,
+    deviceTimestamp: validation.deviceTimestamp,
+    mediaUrl
+  });
+
+  return sequelize.transaction(async (transaction) => {
+    const matched = await findNearbyTaskForVerification({
+      category: routingProfile.category,
+      gpsLat: validation.gpsLat,
+      gpsLng: validation.gpsLng,
+      transaction
+    });
+
+    if (matched) {
+      await insertTaskConfirmation({
+        taskId: matched.id,
+        reporterId: reporter.id,
+        gpsLat: validation.gpsLat,
+        gpsLng: validation.gpsLng,
+        transaction
+      });
+      return refreshVerificationStatus(matched.id, reporter, transaction);
+    }
+
+    const task = await createTaskRecord({
+      ngoUserId: reporter.id,
+      source: "verified_report",
+      status: TASK_STATUS.PENDING,
+      description: description || title,
+      title,
+      type,
+      severity,
+      locationName,
+      latitude: validation.gpsLat,
+      longitude: validation.gpsLng,
+      requiredSkills: body.required_skills || body.requiredSkills,
+      category: routingProfile.category,
+      gpsLat: validation.gpsLat,
+      gpsLng: validation.gpsLng,
+      mediaUrl,
+      contentHash,
+      confirmationCount: 1,
+      transaction
+    });
+
+    return refreshVerificationStatus(task.id, reporter, transaction);
   });
 }
 
@@ -4063,6 +4424,162 @@ app.get("/api/tasks", requireAuth, async (request, response, next) => {
     next(error);
   }
 });
+
+app.post(["/api/tasks", "/tasks"], requireAuth, async (request, response, next) => {
+  try {
+    const task = await createOrConfirmVerifiedTask(request.body, request.user);
+    response.status(201).json({ task: await buildTaskPayload(task, request.user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post(["/api/tasks/:id/confirm", "/tasks/:id/confirm"], requireAuth, async (request, response, next) => {
+  try {
+    const gpsLat =
+      request.body.gps_lat === undefined || request.body.gps_lat === null
+        ? null
+        : Number(request.body.gps_lat);
+    const gpsLng =
+      request.body.gps_lng === undefined || request.body.gps_lng === null
+        ? null
+        : Number(request.body.gps_lng);
+
+    if (
+      (gpsLat !== null && !Number.isFinite(gpsLat)) ||
+      (gpsLng !== null && !Number.isFinite(gpsLng)) ||
+      (gpsLat !== null && (gpsLat < -90 || gpsLat > 90)) ||
+      (gpsLng !== null && (gpsLng < -180 || gpsLng > 180))
+    ) {
+      response.status(400).json({ error: "gps_lat and gps_lng must be valid coordinates when provided." });
+      return;
+    }
+
+    const task = await sequelize.transaction(async (transaction) => {
+      await insertTaskConfirmation({
+        taskId: request.params.id,
+        reporterId: request.user.id,
+        gpsLat,
+        gpsLng,
+        transaction,
+        conflictIsError: true
+      });
+      return refreshVerificationStatus(request.params.id, request.user, transaction);
+    });
+
+    response.json({ task: await buildTaskPayload(task, request.user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.patch(
+  ["/api/tasks/:id/resolve", "/tasks/:id/resolve"],
+  requireAuth,
+  requireRole(["ngo", "admin"]),
+  async (request, response, next) => {
+    try {
+      if (typeof request.body.valid !== "boolean") {
+        response.status(400).json({ error: "valid must be a boolean." });
+        return;
+      }
+
+      const result = await sequelize.transaction(async (transaction) => {
+        const task = await Task.findByPk(request.params.id, {
+          transaction,
+          lock: transaction.LOCK.UPDATE
+        });
+
+        if (!task) {
+          const error = new Error("Task not found.");
+          error.statusCode = 404;
+          throw error;
+        }
+
+        await task.update(
+          {
+            status: request.body.valid ? TASK_STATUS.CONFIRMED : TASK_STATUS.REJECTED,
+            updatedAt: new Date()
+          },
+          { transaction }
+        );
+
+        const [reporters] = await sequelize.query(
+          `
+            SELECT DISTINCT reporter_id
+            FROM (
+              SELECT ngo_id AS reporter_id
+              FROM tasks
+              WHERE id = $1
+              UNION
+              SELECT reporter_id
+              FROM task_confirmations
+              WHERE task_id = $1
+            ) reporters
+            WHERE reporter_id IS NOT NULL
+          `,
+          {
+            bind: [request.params.id],
+            transaction
+          }
+        );
+
+        for (const reporter of reporters) {
+          await updateTrustScore(reporter.reporter_id, request.body.valid, {
+            query(sql, params) {
+              return sequelize.query(sql, {
+                bind: params,
+                transaction,
+                type: Sequelize.QueryTypes.SELECT
+              }).then((rows) => ({ rows }));
+            }
+          });
+        }
+
+        return {
+          task: await Task.findByPk(request.params.id, {
+            include: [{ model: User, as: "ngo" }],
+            transaction
+          }),
+          reporterCount: reporters.length
+        };
+      });
+
+      response.json({
+        task: await buildTaskPayload(result.task, request.user),
+        reporterCount: result.reporterCount
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+app.get(
+  ["/api/users/:id/trust", "/users/:id/trust"],
+  requireAuth,
+  requireRole(["admin"]),
+  async (request, response, next) => {
+    try {
+      const user = await User.findByPk(request.params.id, {
+        attributes: ["trustScore", "reportsTotal", "reportsConfirmed"]
+      });
+
+      if (!user) {
+        response.status(404).json({ error: "User not found." });
+        return;
+      }
+
+      response.json({
+        trust_score: user.trustScore,
+        reports_total: user.reportsTotal,
+        reports_confirmed: user.reportsConfirmed
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
 
 app.get("/api/alerts", requireAuth, async (request, response, next) => {
   try {
