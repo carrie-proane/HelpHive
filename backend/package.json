@@ -6,7 +6,9 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node scripts/dev-local.js"
+    "dev": "node scripts/dev-local.js",
+    "migrate": "node scripts/migrate.js",
+    "test": "node --test tests/*.test.js"
   },
   "dependencies": {
     "@google/genai": "^1.50.1",

@@ -71,6 +71,9 @@ async function createSchema() {
       availability JSONB NOT NULL DEFAULT '{}'::jsonb,
       base_location TEXT,
       company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+      trust_score FLOAT DEFAULT 0.5,
+      reports_total INT DEFAULT 0,
+      reports_confirmed INT DEFAULT 0,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
@@ -96,10 +99,16 @@ async function createSchema() {
       severity TEXT NOT NULL CHECK (severity IN ('critical', 'urgent', 'stable')),
       title TEXT NOT NULL,
       description TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'completed', 'resolved')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('open', 'in_progress', 'completed', 'resolved', 'pending', 'confirmed', 'rejected', 'auto_accepted')),
       source TEXT NOT NULL DEFAULT 'manual',
       location_name TEXT,
       location GEOGRAPHY(POINT, 4326) NOT NULL,
+      confirmation_count INT DEFAULT 1,
+      gps_lat DOUBLE PRECISION,
+      gps_lng DOUBLE PRECISION,
+      reported_at TIMESTAMPTZ DEFAULT now(),
+      media_url TEXT,
+      content_hash VARCHAR,
       required_skills TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
       is_assigned BOOLEAN NOT NULL DEFAULT FALSE,
       assigned_volunteer_ids INTEGER[] NOT NULL DEFAULT ARRAY[]::INTEGER[],
@@ -108,6 +117,18 @@ async function createSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       completed_at TIMESTAMPTZ
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS task_confirmations (
+      id SERIAL PRIMARY KEY,
+      task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+      reporter_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      gps_lat DOUBLE PRECISION,
+      gps_lng DOUBLE PRECISION,
+      reported_at TIMESTAMPTZ DEFAULT now(),
+      UNIQUE(task_id, reporter_id)
     )
   `);
 
