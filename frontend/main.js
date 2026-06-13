@@ -66,7 +66,7 @@ const pageNavKeys = {
   "/report.html": "field_desk"
 };
 
-const API_URL = "http://localhost:3000";
+const API_URL = "";
 const DEMO_LOCATION_STORAGE_KEY = "helpHiveDemoLocation";
 const LEGACY_LOCATION_STORAGE_KEY = "location";
 const DEFAULT_DEMO_LOCATION = {
@@ -720,8 +720,8 @@ function buildReviewImageGalleryMarkup(item = {}) {
   return `
     <div class="review-image-gallery" aria-label="Survey image gallery">
       ${normalizedUrls
-        .map(
-          (url, index) => `
+      .map(
+        (url, index) => `
             <figure class="review-image-frame">
               <img
                 src="${escapeHtml(url)}"
@@ -729,12 +729,12 @@ function buildReviewImageGalleryMarkup(item = {}) {
                 loading="lazy"
               />
               <figcaption>${escapeHtml(
-                normalizedUrls.length > 1 ? `Survey image ${index + 1}` : "Survey image"
-              )}</figcaption>
+          normalizedUrls.length > 1 ? `Survey image ${index + 1}` : "Survey image"
+        )}</figcaption>
             </figure>
           `
-        )
-        .join("")}
+      )
+      .join("")}
     </div>
   `;
 }
@@ -764,16 +764,15 @@ function buildOcrBatchSummaryMarkup(summary = {}) {
         <span>Flagged</span>
         <strong>${escapeHtml(flaggedCount)}</strong>
       </article>
-      ${
-        failedCount
-          ? `
+      ${failedCount
+      ? `
             <article class="ocr-summary-card">
               <span>Failed</span>
               <strong>${escapeHtml(failedCount)}</strong>
             </article>
           `
-          : ""
-      }
+      : ""
+    }
     </div>
   `;
 }
@@ -821,14 +820,14 @@ function renderOcrTableMarkup(lines = []) {
         </thead>
         <tbody>
           ${bodyRows
-            .map(
-              (row) => `
+      .map(
+        (row) => `
                 <tr>
                   ${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}
                 </tr>
               `
-            )
-            .join("")}
+      )
+      .join("")}
         </tbody>
       </table>
     </div>
@@ -887,21 +886,21 @@ function buildOcrBatchResultMarkup(payload = {}) {
     ${buildOcrBatchSummaryMarkup(payload.summary)}
     <div class="ocr-result-stack">
       ${results
-        .map((entry) => {
-          const statusLabel = entry.error
-            ? "Processing failed"
-            : entry.need?.needsReview
-              ? "Flagged for admin review"
-              : "Captured cleanly";
-          const previewMarkup = entry.imageUrl
-            ? `
+      .map((entry) => {
+        const statusLabel = entry.error
+          ? "Processing failed"
+          : entry.need?.needsReview
+            ? "Flagged for admin review"
+            : "Captured cleanly";
+        const previewMarkup = entry.imageUrl
+          ? `
               <figure class="ocr-result-image-frame">
                 <img src="${escapeHtml(entry.imageUrl)}" alt="${escapeHtml(entry.filename || "Survey image")}" loading="lazy" />
               </figure>
             `
-            : "";
+          : "";
 
-          return `
+        return `
             <article class="ocr-result-card ${entry.error ? "has-error" : ""}">
               ${previewMarkup}
               <div class="ocr-result-copy">
@@ -909,10 +908,9 @@ function buildOcrBatchResultMarkup(payload = {}) {
                   <h4>${escapeHtml(entry.filename || "Survey image")}</h4>
                   <span class="pill-tag">${escapeHtml(statusLabel)}</span>
                 </div>
-                ${
-                  entry.error
-                    ? `<p class="helper-copy">${escapeHtml(entry.error)}</p>`
-                    : `
+                ${entry.error
+            ? `<p class="helper-copy">${escapeHtml(entry.error)}</p>`
+            : `
                       <p class="helper-copy">
                         Provider: ${escapeHtml(entry.ocr?.provider || "OCR pipeline")}
                         · Confidence: ${escapeHtml(formatConfidence(entry.ocr?.averageConfidence))}
@@ -921,18 +919,17 @@ function buildOcrBatchResultMarkup(payload = {}) {
                         Languages: ${escapeHtml(joinReadableList(entry.ocr?.languagesDetected || [], "Unspecified"))}
                       </p>
                       ${renderOcrTextMarkup(entry.ocr?.text || "")}
-                      ${
-                        entry.ocr?.lowConfidenceWords?.length
-                          ? `<p class="helper-copy">Flagged words: ${escapeHtml(entry.ocr.lowConfidenceWords.join(", "))}</p>`
-                          : ""
-                      }
+                      ${entry.ocr?.lowConfidenceWords?.length
+              ? `<p class="helper-copy">Flagged words: ${escapeHtml(entry.ocr.lowConfidenceWords.join(", "))}</p>`
+              : ""
+            }
                     `
-                }
+          }
               </div>
             </article>
           `;
-        })
-        .join("")}
+      })
+      .join("")}
     </div>
   `;
 }
@@ -1210,13 +1207,13 @@ function renderIssueSheet(issue) {
     </div>
     <div class="sheet-meta-list">
       ${renderMapSheetRows([
-        { label: "Area", value: locationLabel },
-        { label: "Severity", value: severityLabel },
-        { label: "Status", value: "Open need" },
-        { label: "Last updated", value: withFallback(issue.updated, "Not specified") },
-        { label: "NGO desk", value: ngoLabel },
-        { label: "Heat intensity", value: intensityLabel }
-      ])}
+    { label: "Area", value: locationLabel },
+    { label: "Severity", value: severityLabel },
+    { label: "Status", value: "Open need" },
+    { label: "Last updated", value: withFallback(issue.updated, "Not specified") },
+    { label: "NGO desk", value: ngoLabel },
+    { label: "Heat intensity", value: intensityLabel }
+  ])}
     </div>
     ${renderMapSheetNote("Signals", signals)}
     ${renderMapSheetNote("Mentions", peopleMentionLabel)}
@@ -1239,15 +1236,15 @@ function renderAlertSheet(alert) {
     </div>
     <div class="sheet-meta-list">
       ${renderMapSheetRows([
-        { label: "Area", value: locationLabel },
-        { label: "Severity", value: severityLabel },
-        { label: "Status", value: "Active cluster" },
-        { label: "Reports in cluster", value: String(withFallback(alert.evidenceCount, "0")) },
-        {
-          label: "Cluster strength",
-          value: typeof alert.weightedCount === "number" ? alert.weightedCount.toFixed(1) : "0.0"
-        }
-      ])}
+    { label: "Area", value: locationLabel },
+    { label: "Severity", value: severityLabel },
+    { label: "Status", value: "Active cluster" },
+    { label: "Reports in cluster", value: String(withFallback(alert.evidenceCount, "0")) },
+    {
+      label: "Cluster strength",
+      value: typeof alert.weightedCount === "number" ? alert.weightedCount.toFixed(1) : "0.0"
+    }
+  ])}
     </div>
     ${evidenceItems ? `<ul class="sheet-bullet-list">${evidenceItems}</ul>` : ""}
   `;
@@ -1614,9 +1611,9 @@ function renderTaskDetailModal(task, currentUser) {
 
     <div class="task-card-actions task-detail-footer">
       ${taskActionButtons(task, currentUser, {
-        className: "inline-actions task-detail-actions",
-        mode: "all"
-      })}
+    className: "inline-actions task-detail-actions",
+    mode: "all"
+  })}
     </div>
   `;
 }
@@ -1645,9 +1642,9 @@ function renderTaskCard(task, currentUser) {
       </div>
       <div class="task-card-actions">
         ${taskActionButtons(task, currentUser, {
-          className: "inline-actions task-primary-actions",
-          mode: "primary"
-        })}
+    className: "inline-actions task-primary-actions",
+    mode: "primary"
+  })}
         <button
           class="ghost-button"
           type="button"
@@ -1786,7 +1783,7 @@ async function setupMap(mapElementId, filterPrefix = "") {
   const token = getToken();
 
   if (!token) {
-    return { refreshData: async () => {} };
+    return { refreshData: async () => { } };
   }
 
   function getField(id) {
@@ -1813,13 +1810,13 @@ async function setupMap(mapElementId, filterPrefix = "") {
     const visibleIssues = filteredIssues();
     const prioritizedIssues = isMobile
       ? [...visibleIssues]
-          .sort((left, right) => (right.heatWeight || 0) - (left.heatWeight || 0))
-          .slice(0, MOBILE_MAP_MARKER_LIMIT)
+        .sort((left, right) => (right.heatWeight || 0) - (left.heatWeight || 0))
+        .slice(0, MOBILE_MAP_MARKER_LIMIT)
       : visibleIssues;
     const visibleAlerts = isMobile
       ? [...alerts]
-          .sort((left, right) => (right.weightedCount || 0) - (left.weightedCount || 0))
-          .slice(0, MOBILE_MAP_ALERT_LIMIT)
+        .sort((left, right) => (right.weightedCount || 0) - (left.weightedCount || 0))
+        .slice(0, MOBILE_MAP_ALERT_LIMIT)
       : alerts;
 
     prioritizedIssues.forEach((issue) => {
@@ -2123,20 +2120,19 @@ async function initIntelligencePage(currentUser) {
         );
         volunteerSummary.innerHTML = volunteerTasks.length
           ? volunteerTasks
-              .slice(0, 3)
-              .map(
-                (task) => `
+            .slice(0, 3)
+            .map(
+              (task) => `
                   <li>
                     <span>${task.title}</span>
-                    <strong>${
-                      roleKey === "volunteer"
-                        ? `${Math.round(task.currentUserMatch?.score || 0)} fit score`
-                        : task.assignedUsers.map((user) => user.name).join(", ") || "Pending"
-                    }</strong>
+                    <strong>${roleKey === "volunteer"
+                  ? `${Math.round(task.currentUserMatch?.score || 0)} fit score`
+                  : task.assignedUsers.map((user) => user.name).join(", ") || "Pending"
+                }</strong>
                   </li>
                 `
-              )
-              .join("")
+            )
+            .join("")
           : `<li><span>Matching lane</span><strong>Waiting for the next run</strong></li>`;
       }
 
@@ -2273,9 +2269,8 @@ async function initImpactPage(currentUser) {
     }
     companyField.innerHTML = companies
       .map(
-        (company) => `<option value="${company.id}" ${
-          company.id === currentUser.companyId ? "selected" : ""
-        }>${company.name}</option>`
+        (company) => `<option value="${company.id}" ${company.id === currentUser.companyId ? "selected" : ""
+          }>${company.name}</option>`
       )
       .join("");
   }
@@ -2339,15 +2334,15 @@ async function initImpactPage(currentUser) {
 
       receiptList.innerHTML = combinedRows.length
         ? combinedRows
-            .map(
-              (line) => `
+          .map(
+            (line) => `
                 <li>
                   <span>${line.title}</span>
                   <strong>${line.meta}</strong>
                 </li>
               `
-            )
-            .join("")
+          )
+          .join("")
         : `<li><span>No receipt lines yet</span><strong>Waiting on completed tasks</strong></li>`;
     }
   }
@@ -2370,8 +2365,8 @@ async function initImpactPage(currentUser) {
     chartPanel.innerHTML = `
       <div class="csr-chart-grid">
         ${series
-          .map(
-            (entry) => `
+        .map(
+          (entry) => `
               <div class="csr-chart-bar">
                 <div class="csr-chart-track">
                   <div class="csr-chart-fill" style="height: ${Math.max(entry.height || 0, 18)}%;"></div>
@@ -2380,8 +2375,8 @@ async function initImpactPage(currentUser) {
                 <div class="csr-chart-value">${entry.hours} hrs</div>
               </div>
             `
-          )
-          .join("")}
+        )
+        .join("")}
       </div>
     `;
   }
@@ -2430,7 +2425,7 @@ async function initImpactPage(currentUser) {
     if (roleKey === "ngo_admin") {
       await loadCompanies();
     } else {
-      void loadCompanies().catch(() => {});
+      void loadCompanies().catch(() => { });
     }
     await loadReport();
     setLoadingState(false);
@@ -2497,37 +2492,36 @@ async function initAdminPage() {
       if (alertStack) {
         alertStack.innerHTML = summaryData.alerts.length
           ? summaryData.alerts
-              .map(
-                (alert) => `
+            .map(
+              (alert) => `
                   <article class="dashboard-shell coral">
                     <span class="severity-badge ${alert.severity}">${capitalize(alert.severity)}</span>
                     <h3>${alert.title}</h3>
                     <p class="muted">${alert.explanation}</p>
-                    ${
-                      alert.evidence?.length
-                        ? `<p class="helper-copy">${alert.evidence.join(" · ")}</p>`
-                        : ""
-                    }
+                    ${alert.evidence?.length
+                  ? `<p class="helper-copy">${alert.evidence.join(" · ")}</p>`
+                  : ""
+                }
                   </article>
                 `
-              )
-              .join("")
+            )
+            .join("")
           : renderEmptyState("No live alerts need admin attention.");
       }
 
       if (reviewQueue) {
         reviewQueue.innerHTML = reviewData.items.length
           ? reviewData.items
-              .map(
-                (item) => `
+            .map(
+              (item) => `
                   <article class="task-card" data-review-card data-review-id="${escapeHtml(item.id)}">
                     <span class="severity-badge ${escapeHtml(item.severity || "stable")}">${escapeHtml(
-                      capitalize(item.severity || "stable")
-                    )}</span>
+                capitalize(item.severity || "stable")
+              )}</span>
                     <h3>${escapeHtml(item.title || "Untitled need")}</h3>
                     <p class="helper-copy">Source: ${escapeHtml(item.source || "ocr")} · Confidence: ${escapeHtml(
-                      formatConfidence(item.confidence)
-                    )}</p>
+                formatConfidence(item.confidence)
+              )}</p>
                     ${buildReviewImageGalleryMarkup(item)}
                     <form class="stack-form queue-editor" data-review-form data-need-id="${escapeHtml(item.id)}">
                       <label>
@@ -2541,8 +2535,8 @@ async function initAdminPage() {
                       <label>
                         Corrected text
                         <textarea name="correctedText">${escapeHtml(
-                          item.correctedText || item.rawText || item.description || ""
-                        )}</textarea>
+                item.correctedText || item.rawText || item.description || ""
+              )}</textarea>
                       </label>
                       <label>
                         Severity
@@ -2556,16 +2550,14 @@ async function initAdminPage() {
                         Location
                         <input name="locationName" value="${escapeHtml(item.locationName || "")}" />
                       </label>
-                      ${
-                        item.flaggedWords?.length
-                          ? `<p class="helper-copy">Flagged terms: ${escapeHtml(item.flaggedWords.join(", "))}</p>`
-                          : ""
-                      }
-                      ${
-                        item.evidence?.length
-                          ? `<p class="helper-copy">Evidence: ${escapeHtml(item.evidence.join(" · "))}</p>`
-                          : ""
-                      }
+                      ${item.flaggedWords?.length
+                  ? `<p class="helper-copy">Flagged terms: ${escapeHtml(item.flaggedWords.join(", "))}</p>`
+                  : ""
+                }
+                      ${item.evidence?.length
+                  ? `<p class="helper-copy">Evidence: ${escapeHtml(item.evidence.join(" · "))}</p>`
+                  : ""
+                }
                       <div class="review-card-actions">
                         <button class="cta-button" type="submit">Approve and update</button>
                         <button class="danger-button" type="button" data-review-reject-toggle>Reject</button>
@@ -2580,8 +2572,8 @@ async function initAdminPage() {
                     </form>
                   </article>
                 `
-              )
-              .join("")
+            )
+            .join("")
           : renderEmptyState("The review queue is clear right now.");
       }
     } catch (error) {
@@ -2599,37 +2591,34 @@ async function initAdminPage() {
         if (matchResults) {
           matchResults.innerHTML = result.matches.length
             ? result.matches
-                .map(
-                  (match) => `
+              .map(
+                (match) => `
                     <article class="dashboard-shell teal">
                       <h3>${match.taskTitle}</h3>
                       <p class="muted">${match.locationName}</p>
                       <p class="helper-copy">
                         Required: ${(match.requiredSkills || []).map(prettyLabel).join(", ") || "General support"}
                       </p>
-                      ${
-                        match.complementarySkills?.length
-                          ? `<p class="helper-copy">Complementary: ${match.complementarySkills.map(prettyLabel).join(", ")}</p>`
-                          : ""
-                      }
+                      ${match.complementarySkills?.length
+                    ? `<p class="helper-copy">Complementary: ${match.complementarySkills.map(prettyLabel).join(", ")}</p>`
+                    : ""
+                  }
                       <p>${match.volunteers.length ? match.volunteers.map((user) => user.name).join(" + ") : "No strong match yet"}</p>
                       <p class="helper-copy">${match.safetyMode === "buddy_required" ? "Buddy team required" : "Solo-safe assignment"}</p>
-                      ${
-                        match.volunteers.length
-                          ? `<p class="helper-copy">${match.volunteers
-                              .map((user) => `${user.name}: ${(user.reasons || []).join(", ")}`)
-                              .join(" · ")}</p>`
-                          : ""
-                      }
-                      ${
-                        match.warnings?.length
-                          ? `<p class="helper-copy">${match.warnings.join(" · ")}</p>`
-                          : ""
-                      }
+                      ${match.volunteers.length
+                    ? `<p class="helper-copy">${match.volunteers
+                      .map((user) => `${user.name}: ${(user.reasons || []).join(", ")}`)
+                      .join(" · ")}</p>`
+                    : ""
+                  }
+                      ${match.warnings?.length
+                    ? `<p class="helper-copy">${match.warnings.join(" · ")}</p>`
+                    : ""
+                  }
                     </article>
                   `
-                )
-                .join("")
+              )
+              .join("")
             : renderEmptyState("No pairings were created.");
         }
 
@@ -2956,10 +2945,9 @@ async function initReportPage() {
             <p class="helper-copy">Languages: ${(result.transcript.languagesDetected || []).join(", ") || "Unspecified"}</p>
             <pre>${result.transcript.text}</pre>
             <p class="helper-copy">Classified as ${capitalize(result.need.type)} with ${capitalize(result.need.severity)} severity.</p>
-            ${
-              result.transcript.keyPhrases?.length
-                ? `<p class="helper-copy">Key phrases: ${result.transcript.keyPhrases.join(", ")}</p>`
-                : ""
+            ${result.transcript.keyPhrases?.length
+              ? `<p class="helper-copy">Key phrases: ${result.transcript.keyPhrases.join(", ")}</p>`
+              : ""
             }
           `;
         }
