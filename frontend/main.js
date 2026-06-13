@@ -17,14 +17,14 @@ const roleHomes = {
   ngo_admin: "./admin.html",
   ngo_worker: "./report.html",
   volunteer: "./intelligence.html",
-  csr: "./impact.html"
+  csr: "./csr-dashboard.html"
 };
 
 const visibleTabsByRole = {
   ngo_admin: ["home", "intelligence", "admin_dashboard"],
   ngo_worker: ["home", "intelligence", "field_desk"],
   volunteer: ["home", "intelligence", "my_tasks"],
-  csr: ["home", "impact", "csr_dashboard"]
+  csr: ["home", "csr_dashboard"]
 };
 
 const roleNavigationTabs = {
@@ -1394,8 +1394,13 @@ function renderHeaderActions(currentUser) {
       return;
     }
 
+    const partnersBtn = roleKey === "csr"
+      ? `<a class="ghost-button" href="./csr-dashboard.html?tab=partners">Partners</a>`
+      : "";
+
     slot.innerHTML = `
       <div class="header-link-row">
+        ${partnersBtn}
         <a class="ghost-button" href="${roleHomes[roleKey] || "./intelligence.html"}">Dashboard</a>
         <a class="ghost-button" href="./profile.html">Profile</a>
         <div class="user-badge">
@@ -2233,6 +2238,220 @@ async function initImpactPage(currentUser) {
     return;
   }
 
+  let selectedNgoId = null;
+  let selectedNgoName = null;
+
+  const dashboardTabBtn = document.getElementById("btnDashboardTab");
+  const partnersTabBtn = document.getElementById("btnPartnersTab");
+  const dashboardContent = document.getElementById("tabDashboardContent");
+  const partnersContent = document.getElementById("tabPartnersContent");
+  const ngoListContainer = document.getElementById("ngoList");
+  const registerNgoForm = document.getElementById("registerNgoForm");
+  const ngoFilterBanner = document.getElementById("ngoFilterBanner");
+  const ngoFilterName = document.getElementById("ngoFilterName");
+  const clearNgoFilterBtn = document.getElementById("btnClearNgoFilter");
+
+  function switchTab(tab) {
+    if (!dashboardTabBtn || !partnersTabBtn || !dashboardContent || !partnersContent) {
+      return;
+    }
+    if (tab === "dashboard") {
+      dashboardTabBtn.classList.remove("ghost-button");
+      dashboardTabBtn.classList.add("cta-button");
+      partnersTabBtn.classList.remove("cta-button");
+      partnersTabBtn.classList.add("ghost-button");
+      dashboardContent.classList.remove("hidden");
+      partnersContent.classList.add("hidden");
+    } else if (tab === "partners") {
+      partnersTabBtn.classList.remove("ghost-button");
+      partnersTabBtn.classList.add("cta-button");
+      dashboardTabBtn.classList.remove("cta-button");
+      dashboardTabBtn.classList.add("ghost-button");
+      partnersContent.classList.remove("hidden");
+      dashboardContent.classList.add("hidden");
+      void loadNgoList();
+    }
+  }
+
+  if (dashboardTabBtn) {
+    dashboardTabBtn.addEventListener("click", () => switchTab("dashboard"));
+  }
+  if (partnersTabBtn) {
+    partnersTabBtn.addEventListener("click", () => switchTab("partners"));
+  }
+
+  function updateFilterBanner() {
+    if (!ngoFilterBanner || !ngoFilterName) return;
+    if (selectedNgoId && selectedNgoName) {
+      ngoFilterName.textContent = selectedNgoName;
+      ngoFilterBanner.classList.remove("hidden");
+    } else {
+      ngoFilterBanner.classList.add("hidden");
+    }
+  }
+
+  if (clearNgoFilterBtn) {
+    clearNgoFilterBtn.addEventListener("click", async () => {
+      selectedNgoId = null;
+      selectedNgoName = null;
+      updateFilterBanner();
+      try {
+        setLoadingState(true, "Clearing NGO filter...");
+        await loadReport();
+      } catch (error) {
+        showGlobalBanner(error.message || "Could not reload the report.", "error");
+      } finally {
+        setLoadingState(false);
+      }
+    });
+  }
+
+  let cachedNgos = [];
+
+  function getStatusBadge(ngo) {
+    if (!ngo.latestActivity) {
+      return { label: "New", color: "#3b82f6", bg: "rgba(59,130,246,0.1)" };
+    }
+    const daysSince = Math.floor((Date.now() - new Date(ngo.latestActivity).getTime()) / 86400000);
+    if (daysSince <= 30) {
+      return { label: "Active", color: "#10b981", bg: "rgba(16,185,129,0.1)" };
+    } else if (daysSince <= 90) {
+      return { label: "Moderate", color: "#f59e0b", bg: "rgba(245,158,11,0.1)" };
+    }
+    return { label: "Inactive", color: "#ef4444", bg: "rgba(239,68,68,0.1)" };
+  }
+
+  function renderNgoCard(ngo) {
+    const badge = getStatusBadge(ngo);
+    const lastActive = ngo.latestActivity
+      ? new Date(ngo.latestActivity).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
+      : "No activity yet";
+    return `
+      <article class="task-card compact stable" style="margin-bottom: 16px; border: 1px solid var(--surface-border); padding: 18px; border-radius: 10px; background: var(--surface-background); transition: box-shadow 0.2s, transform 0.15s;" onmouseenter="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.08)'; this.style.transform='translateY(-1px)'" onmouseleave="this.style.boxShadow='none'; this.style.transform='none'">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <span style="background: ${badge.bg}; color: ${badge.color}; padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase;">${badge.label}</span>
+          <span style="font-size: 0.75rem; color: var(--text-secondary);">Last active: ${lastActive}</span>
+        </div>
+        <h3 style="margin: 0 0 4px 0; font-size: 1.15rem; font-weight: 600;">${escapeHtml(ngo.name)}</h3>
+        <p style="margin: 0 0 14px 0; font-size: 0.85rem; color: var(--text-secondary);">${escapeHtml(ngo.email)}</p>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;">
+          <span style="display: inline-flex; align-items: center; gap: 4px; background: var(--interactive-gray); padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; color: var(--text-secondary);">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            ${escapeHtml(ngo.baseLocation || "No location")}
+          </span>
+          <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(99,102,241,0.08); padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; color: #6366f1; font-weight: 500;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+            ${ngo.completedTasks}/${ngo.totalTasks} tasks done
+          </span>
+          <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(16,185,129,0.08); padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; color: #10b981; font-weight: 500;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+            ${ngo.peopleServed.toLocaleString()} people served
+          </span>
+        </div>
+        <div>
+          <button class="cta-button show-ngo-details-btn" type="button" data-id="${escapeHtml(ngo.id)}" data-name="${escapeHtml(ngo.name)}" style="min-height: 34px; padding: 6px 16px; font-size: 0.85rem; margin: 0;">View on Dashboard</button>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderFilteredNgos(searchTerm) {
+    if (!ngoListContainer) return;
+    const term = (searchTerm || "").toLowerCase().trim();
+    const filtered = term
+      ? cachedNgos.filter(
+          (ngo) =>
+            ngo.name.toLowerCase().includes(term) ||
+            (ngo.baseLocation || "").toLowerCase().includes(term)
+        )
+      : cachedNgos;
+
+    if (!filtered.length) {
+      ngoListContainer.innerHTML = `<div class="empty-state"><p>${
+        term ? "No partners match your search." : "No NGO partners registered yet."
+      }</p></div>`;
+      return;
+    }
+
+    ngoListContainer.innerHTML = filtered.map(renderNgoCard).join("");
+
+    ngoListContainer.querySelectorAll(".show-ngo-details-btn").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const ngoId = btn.getAttribute("data-id");
+        const ngoName = btn.getAttribute("data-name");
+        selectedNgoId = ngoId;
+        selectedNgoName = ngoName;
+
+        updateFilterBanner();
+        switchTab("dashboard");
+
+        try {
+          setLoadingState(true, `Filtering report for ${ngoName}...`);
+          await loadReport();
+        } catch (error) {
+          showGlobalBanner(error.message || "Could not load filtered report.", "error");
+        } finally {
+          setLoadingState(false);
+        }
+      });
+    });
+  }
+
+  const ngoSearchInput = document.getElementById("ngoSearchInput");
+  if (ngoSearchInput) {
+    let searchDebounce = null;
+    ngoSearchInput.addEventListener("input", () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        renderFilteredNgos(ngoSearchInput.value);
+      }, 200);
+    });
+  }
+
+  async function loadNgoList() {
+    if (!ngoListContainer) return;
+    try {
+      ngoListContainer.innerHTML = '<div class="empty-state"><p>Loading NGO partners...</p></div>';
+      const result = await apiFetch("/api/ngos");
+      cachedNgos = result.ngos || [];
+      if (ngoSearchInput) ngoSearchInput.value = "";
+      renderFilteredNgos("");
+    } catch (error) {
+      ngoListContainer.innerHTML = `<div class="empty-state error"><p>Error loading NGO partners: ${escapeHtml(error.message)}</p></div>`;
+    }
+  }
+
+  if (registerNgoForm) {
+    registerNgoForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const formData = new FormData(registerNgoForm);
+      const name = formData.get("name")?.trim();
+      const email = formData.get("email")?.trim();
+      const password = formData.get("password");
+      const baseLocation = formData.get("baseLocation")?.trim();
+
+      if (!name || !email || !password) {
+        showGlobalBanner("Name, email, and password are required.", "error");
+        return;
+      }
+
+      try {
+        setLoadingState(true, "Registering new NGO partner...");
+        await apiFetch("/api/ngos", {
+          method: "POST",
+          body: { name, email, password, baseLocation }
+        });
+        showGlobalBanner(`Successfully registered partner: ${name}`, "success");
+        registerNgoForm.reset();
+        await loadNgoList();
+      } catch (error) {
+        showGlobalBanner(error.message || "Failed to register NGO partner.", "error");
+      } finally {
+        setLoadingState(false);
+      }
+    });
+  }
+
   function setLoadingState(isLoading, message = "") {
     if (loadingState) {
       loadingState.classList.toggle("hidden", !isLoading);
@@ -2391,6 +2610,9 @@ async function initImpactPage(currentUser) {
       startDate: startDateField?.value || "",
       endDate: endDateField?.value || ""
     };
+    if (selectedNgoId) {
+      filters.ngoId = selectedNgoId;
+    }
     const queryString = buildQueryString(filters);
     const report =
       selectedCompanyId && roleKey === "ngo_admin"
@@ -2422,12 +2644,19 @@ async function initImpactPage(currentUser) {
   try {
     setLoadingState(true);
     hydrateCompanyFieldFromSession();
+    updateFilterBanner();
     if (roleKey === "ngo_admin") {
       await loadCompanies();
     } else {
       void loadCompanies().catch(() => { });
     }
     await loadReport();
+
+    // Check if we should default to the partners tab
+    const urlParams = new URLSearchParams(window.location.search);
+    const initialTab = urlParams.get("tab") === "partners" ? "partners" : "dashboard";
+    switchTab(initialTab);
+
     setLoadingState(false);
 
     if (filterForm) {
@@ -2991,76 +3220,135 @@ async function initReportPage() {
 }
 
 async function initProfilePage(currentUser) {
-  const form = document.getElementById("profileForm");
-  const nameField = document.getElementById("profileName");
-  const skillsField = document.getElementById("profileSkills");
-  const languagesField = document.getElementById("profileLanguages");
-  const medicalTrainingField = document.getElementById("profileMedicalTraining");
-  const technicalSkillsField = document.getElementById("profileTechnicalSkills");
-  const communicationStyleField = document.getElementById("profileCommunicationStyle");
-  const preferredCausesField = document.getElementById("profilePreferredCauses");
-  const govIdField = document.getElementById("profileGovIdLast4");
-  const emergencyNameField = document.getElementById("profileEmergencyName");
-  const emergencyPhoneField = document.getElementById("profileEmergencyPhone");
-  const vaccinationStatusField = document.getElementById("profileVaccinationStatus");
-  const availabilityField = document.getElementById("profileAvailability");
-  const locationField = document.getElementById("profileLocation");
-
-  if (!form || !currentUser) {
+  if (!currentUser) {
     return;
   }
 
-  nameField.value = currentUser.name || "";
-  skillsField.value = (currentUser.skills || []).join(", ");
-  languagesField.value = (currentUser.languages || []).join(", ");
-  if (medicalTrainingField) {
-    medicalTrainingField.value = currentUser.medicalTraining || "none";
-  }
-  if (technicalSkillsField) {
-    technicalSkillsField.value = (currentUser.technicalSkills || []).join(", ");
-  }
-  if (communicationStyleField) {
-    communicationStyleField.value = currentUser.communicationStyle || "community_bridge";
-  }
-  if (preferredCausesField) {
-    preferredCausesField.value = (currentUser.preferredCauses || []).join(", ");
-  }
-  if (govIdField) {
-    govIdField.value = currentUser.govIdLast4 || "";
-  }
-  if (emergencyNameField) {
-    emergencyNameField.value = currentUser.emergencyContactName || "";
-  }
-  if (emergencyPhoneField) {
-    emergencyPhoneField.value = currentUser.emergencyContactPhone || "";
-  }
-  if (vaccinationStatusField) {
-    vaccinationStatusField.value = currentUser.vaccinationStatus || "unknown";
-  }
-  availabilityField.value = currentUser.availability || "";
-  locationField.value = currentUser.baseLocation || "";
+  const roleKey = getRoleKey(currentUser);
+  const volunteerSection = document.getElementById("volunteerProfileSection");
+  const csrSection = document.getElementById("csrProfileSection");
+  const volunteerHero = document.getElementById("volunteerProfileHero");
+  const csrHero = document.getElementById("csrProfileHero");
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const formData = new FormData(form);
+  if (roleKey === "csr") {
+    if (volunteerSection) volunteerSection.classList.add("hidden");
+    if (csrSection) csrSection.classList.remove("hidden");
+    if (volunteerHero) volunteerHero.classList.add("hidden");
+    if (csrHero) csrHero.classList.remove("hidden");
 
-    try {
-      const payload = Object.fromEntries(formData.entries());
-      payload.skills = payload.skills || "";
-      payload.technicalSkills = payload.technicalSkills || "";
-      payload.languages = payload.languages || "";
-      payload.preferredCauses = payload.preferredCauses || "";
-      const result = await apiFetch("/api/profile", {
-        method: "PUT",
-        body: payload
+    const csrForm = document.getElementById("csrProfileForm");
+    if (csrForm) {
+      const contactNameField = document.getElementById("csrContactName");
+      const companyNameField = document.getElementById("csrCompanyName");
+      const sectorField = document.getElementById("csrSector");
+      const budgetField = document.getElementById("csrBudget");
+      const headquartersField = document.getElementById("csrHeadquarters");
+      const websiteField = document.getElementById("csrWebsite");
+      const descriptionField = document.getElementById("csrDescription");
+
+      if (contactNameField) contactNameField.value = currentUser.name || "";
+      if (companyNameField) companyNameField.value = currentUser.companyName || "";
+
+      const details = currentUser.companyDetails || {};
+      if (sectorField) sectorField.value = details.sector || "";
+      if (budgetField) budgetField.value = details.budgetRange || "";
+      if (headquartersField) headquartersField.value = details.headquarters || "";
+      if (websiteField) websiteField.value = details.website || "";
+      if (descriptionField) descriptionField.value = details.description || "";
+
+      csrForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(csrForm);
+
+        try {
+          const payload = Object.fromEntries(formData.entries());
+          const result = await apiFetch("/api/profile", {
+            method: "PUT",
+            body: payload
+          });
+          localStorage.setItem("kindredUser", JSON.stringify(result.user));
+          setFlash("Corporate profile updated.", "success");
+          window.location.reload();
+        } catch (error) {
+          showGlobalBanner(error.message || "Could not save your corporate profile.", "error");
+        }
       });
-      localStorage.setItem("kindredUser", JSON.stringify(result.user));
-      setFlash("Profile updated.", "success");
-      window.location.reload();
-    } catch (error) {
-      showGlobalBanner(error.message || "Could not save your profile.", "error");
     }
-  });
+  } else {
+    if (volunteerSection) volunteerSection.classList.remove("hidden");
+    if (csrSection) csrSection.classList.add("hidden");
+    if (volunteerHero) volunteerHero.classList.remove("hidden");
+    if (csrHero) csrHero.classList.add("hidden");
+
+    const form = document.getElementById("profileForm");
+    const nameField = document.getElementById("profileName");
+    const skillsField = document.getElementById("profileSkills");
+    const languagesField = document.getElementById("profileLanguages");
+    const medicalTrainingField = document.getElementById("profileMedicalTraining");
+    const technicalSkillsField = document.getElementById("profileTechnicalSkills");
+    const communicationStyleField = document.getElementById("profileCommunicationStyle");
+    const preferredCausesField = document.getElementById("profilePreferredCauses");
+    const govIdField = document.getElementById("profileGovIdLast4");
+    const emergencyNameField = document.getElementById("profileEmergencyName");
+    const emergencyPhoneField = document.getElementById("profileEmergencyPhone");
+    const vaccinationStatusField = document.getElementById("profileVaccinationStatus");
+    const availabilityField = document.getElementById("profileAvailability");
+    const locationField = document.getElementById("profileLocation");
+
+    if (form) {
+      if (nameField) nameField.value = currentUser.name || "";
+      if (skillsField) skillsField.value = (currentUser.skills || []).join(", ");
+      if (languagesField) languagesField.value = (currentUser.languages || []).join(", ");
+      if (medicalTrainingField) {
+        medicalTrainingField.value = currentUser.medicalTraining || "none";
+      }
+      if (technicalSkillsField) {
+        technicalSkillsField.value = (currentUser.technicalSkills || []).join(", ");
+      }
+      if (communicationStyleField) {
+        communicationStyleField.value = currentUser.communicationStyle || "community_bridge";
+      }
+      if (preferredCausesField) {
+        preferredCausesField.value = (currentUser.preferredCauses || []).join(", ");
+      }
+      if (govIdField) {
+        govIdField.value = currentUser.govIdLast4 || "";
+      }
+      if (emergencyNameField) {
+        emergencyNameField.value = currentUser.emergencyContactName || "";
+      }
+      if (emergencyPhoneField) {
+        emergencyPhoneField.value = currentUser.emergencyContactPhone || "";
+      }
+      if (vaccinationStatusField) {
+        vaccinationStatusField.value = currentUser.vaccinationStatus || "unknown";
+      }
+      if (availabilityField) availabilityField.value = currentUser.availability || "";
+      if (locationField) locationField.value = currentUser.baseLocation || "";
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const formData = new FormData(form);
+
+        try {
+          const payload = Object.fromEntries(formData.entries());
+          payload.skills = payload.skills || "";
+          payload.technicalSkills = payload.technicalSkills || "";
+          payload.languages = payload.languages || "";
+          payload.preferredCauses = payload.preferredCauses || "";
+          const result = await apiFetch("/api/profile", {
+            method: "PUT",
+            body: payload
+          });
+          localStorage.setItem("kindredUser", JSON.stringify(result.user));
+          setFlash("Profile updated.", "success");
+          window.location.reload();
+        } catch (error) {
+          showGlobalBanner(error.message || "Could not save your profile.", "error");
+        }
+      });
+    }
+  }
 }
 
 function getRedirectTarget(currentUser) {

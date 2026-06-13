@@ -51,7 +51,8 @@
       </header>
 
       <main>
-        <section class="page-hero fade-in">
+        <!-- Volunteer Profile Hero -->
+        <section id="volunteerProfileHero" class="page-hero fade-in">
           <div class="page-hero-panel">
             <div class="page-hero-grid slim">
               <div class="page-hero-copy">
@@ -78,9 +79,41 @@
           </div>
         </section>
 
+        <!-- CSR Profile Hero -->
+        <section id="csrProfileHero" class="page-hero fade-in hidden">
+          <div class="page-hero-panel">
+            <div class="page-hero-grid slim">
+              <div class="page-hero-copy">
+                <span class="eyebrow">Corporate Profile</span>
+                <h1>Sponsorship and impact tracking.</h1>
+                <p>
+                  Define your focus areas, set your annual sponsorship budget, and overview your social contribution to civic activities.
+                </p>
+              </div>
+              <div class="page-hero-visual">
+                <div class="stack-column" style="gap: 14px; display: flex; flex-direction: column;">
+                  <article class="visual-card teal" style="margin: 0; padding: 16px 20px; border-radius: 20px;">
+                    <span class="side-kicker">Corporate Sponsorship</span>
+                    <p class="muted" style="font-size: 0.88rem; margin: 6px 0 0; line-height: 1.5;">
+                      HelpHive uses corporate profiles to automatically associate incoming community needs with relevant corporate social responsibility goals and focus areas.
+                    </p>
+                  </article>
+                  <article class="visual-card lavender" style="margin: 0; padding: 16px 20px; border-radius: 20px;">
+                    <span class="side-kicker">Impact Tracking</span>
+                    <p class="muted" style="font-size: 0.88rem; margin: 6px 0 0; line-height: 1.5;">
+                      Once linked, you can monitor impact metrics like volunteer hours sponsored, funds deployed, and people served directly on your CSR Dashboard.
+                    </p>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <section class="section fade-in">
           <div class="sheet sand">
-            <div class="two-column-grid">
+            <!-- Volunteer / NGO / Admin Profile Section -->
+            <div id="volunteerProfileSection" class="two-column-grid">
               <article class="contact-card sand">
                 <h3>Update your details</h3>
                 <form class="stack-form" id="profileForm">
@@ -182,6 +215,47 @@
                 </article>
               </div>
             </div>
+
+            <!-- CSR / Corporate Profile Section -->
+            <div id="csrProfileSection" class="hidden">
+              <article class="contact-card sand">
+                <h3>Update corporate details</h3>
+                <form class="stack-form" id="csrProfileForm" style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 24px; align-items: start;">
+                  <label style="margin: 0;">
+                    Contact person name
+                    <input id="csrContactName" name="name" required />
+                  </label>
+                  <label style="margin: 0;">
+                    Company name
+                    <input id="csrCompanyName" name="companyName" required />
+                  </label>
+                  <label style="margin: 0;">
+                    CSR Focus Areas / Sectors
+                    <input id="csrSector" name="sector" placeholder="Water, health, sanitation, nutrition, education" />
+                  </label>
+                  <label style="margin: 0;">
+                    Annual CSR Funding Budget
+                    <input id="csrBudget" name="budgetRange" placeholder="e.g. ₹50,00,000 / year" />
+                  </label>
+                  <label style="margin: 0;">
+                    Headquarters / Office Location
+                    <input id="csrHeadquarters" name="headquarters" placeholder="Mumbai, Pune, Bangalore..." />
+                  </label>
+                  <label style="margin: 0;">
+                    Company Website
+                    <input id="csrWebsite" name="website" placeholder="https://example.com" />
+                  </label>
+                  <label style="grid-column: span 2; margin: 0;">
+                    Company Description & CSR Vision
+                    <textarea id="csrDescription" name="description" placeholder="Describe your corporate social responsibility vision..." style="min-height: 120px;"></textarea>
+                  </label>
+                  <div style="grid-column: span 2; display: flex; justify-content: flex-end; margin-top: 10px;">
+                    <button class="cta-button" type="submit" style="margin: 0;">Save corporate profile</button>
+                  </div>
+                </form>
+              </article>
+            </div>
+
           </div>
         </section>
       </main>

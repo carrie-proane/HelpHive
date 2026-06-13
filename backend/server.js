@@ -10,6 +10,7 @@ const jwt = require("jsonwebtoken");
 const multer = require("multer");
 const Handlebars = require("handlebars");
 const puppeteer = require("puppeteer");
+const PDFDocument = require("pdfkit");
 const { GoogleGenAI, createPartFromUri, createUserContent } = require("@google/genai");
 const twilio = require("twilio");
 const Tesseract = require("tesseract.js");
@@ -1921,6 +1922,11 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: 0,
       field: "reports_confirmed"
+    },
+    baseLocation: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: "base_location"
     }
   },
   {
@@ -2910,6 +2916,20 @@ function serializeUser(user, options = {}) {
   const coordinates = pointToCoordinates(profile?.location);
   const verification = buildVerificationSummary(profile || {});
 
+  let companyDetails = {};
+  if (user?.company?.details) {
+    const rawDetails = user.company.details;
+    if (typeof rawDetails === "object") {
+      companyDetails = rawDetails;
+    } else {
+      try {
+        companyDetails = JSON.parse(rawDetails);
+      } catch (e) {
+        companyDetails = { description: rawDetails };
+      }
+    }
+  }
+
   const payload = {
     id: user.id,
     name: user.name,
@@ -2918,6 +2938,7 @@ function serializeUser(user, options = {}) {
     roleLabel: ROLE_LABELS[user.role] || titleCase(user.role),
     companyId: user.companyId || null,
     companyName: user.company?.name || null,
+    companyDetails,
     skills: profile?.skills || [],
     technicalSkills: profile?.technicalSkills || [],
     languages: profile?.languages || [],
@@ -3777,16 +3798,21 @@ async function buildCSRStats(companyId, filters = {}) {
   }
 
   const dateRange = buildDateRange(filters, filters);
-  const contributionWhere = {
-    companyId,
-    ...buildDateWhere("date", dateRange.startDate, dateRange.endDate)
-  };
   const taskWhere = {
     companyId,
     completedAt: {
       [Op.not]: null
     },
     ...buildDateWhere("completedAt", dateRange.startDate, dateRange.endDate)
+  };
+
+  if (filters.ngoId) {
+    taskWhere.ngoId = filters.ngoId;
+  }
+
+  const contributionWhere = {
+    companyId,
+    ...buildDateWhere("date", dateRange.startDate, dateRange.endDate)
   };
 
   const [contributions, completedTasks, reports] = await Promise.all([
@@ -3988,6 +4014,47 @@ async function renderCSRHtml(stats) {
   });
 }
 
+async function writeFallbackCSRReport(reportPath, stats) {
+  await fsPromises.mkdir(path.dirname(reportPath), { recursive: true });
+
+  const doc = new PDFDocument({ margin: 48, size: "A4" });
+  const stream = fs.createWriteStream(reportPath);
+  doc.pipe(stream);
+
+  doc.fontSize(24).text(`${stats.company.name} Impact Report`);
+  doc.moveDown(0.5);
+  doc.fontSize(12).text(stats.narrative);
+  doc.moveDown();
+
+  const metricLines = [
+    ["Volunteer Hours", stats.totals.volunteerHours],
+    ["Tasks Completed", stats.totals.tasksFunded],
+    ["People Served", stats.totals.peopleServed],
+    ["Funds Tracked", `INR ${Number(stats.totals.funds || 0).toLocaleString("en-IN")}`]
+  ];
+
+  for (const [label, value] of metricLines) {
+    doc.fontSize(14).text(`${label}: ${value}`);
+    doc.moveDown(0.25);
+  }
+
+  doc.moveDown();
+  doc.fontSize(16).text("Receipt Lines");
+  doc.moveDown(0.25);
+
+  for (const [index, line] of stats.receiptLines.entries()) {
+    doc.fontSize(12).text(
+      `${index + 1}. ${line.title} · ${line.locationName} · ${line.volunteers} volunteers`
+    );
+  }
+
+  doc.end();
+  await new Promise((resolve, reject) => {
+    stream.on("finish", resolve);
+    stream.on("error", reject);
+  });
+}
+
 async function generateCSRReport(companyId, filters = {}) {
   const stats = await buildCSRStats(companyId, filters);
   if (!stats) {
@@ -3997,27 +4064,38 @@ async function generateCSRReport(companyId, filters = {}) {
   const html = await renderCSRHtml(stats);
   const filename = `csr-report-${companyId}-${Date.now()}.pdf`;
   const reportPath = path.join(REPORTS_DIR, filename);
-  const browser = await puppeteer.launch({
-    headless: "new",
-    args: ["--no-sandbox", "--disable-setuid-sandbox"]
-  });
-
   try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle0" });
-    await page.pdf({
-      path: reportPath,
-      format: "A4",
-      printBackground: true,
-      margin: {
-        top: "18px",
-        right: "18px",
-        bottom: "18px",
-        left: "18px"
-      }
+    const browser = await puppeteer.launch({
+      headless: "new",
+      args: ["--no-sandbox", "--disable-setuid-sandbox"]
     });
-  } finally {
-    await browser.close();
+
+    try {
+      const page = await browser.newPage();
+      await page.setContent(html, { waitUntil: "networkidle0" });
+      await page.pdf({
+        path: reportPath,
+        format: "A4",
+        printBackground: true,
+        margin: {
+          top: "18px",
+          right: "18px",
+          bottom: "18px",
+          left: "18px"
+        }
+      });
+    } finally {
+      await browser.close();
+    }
+  } catch (error) {
+    if (!/Could not find Chrome/i.test(error.message || "")) {
+      throw error;
+    }
+
+    console.warn(
+      "Puppeteer Chrome not available; generating CSR report with PDFKit fallback."
+    );
+    await writeFallbackCSRReport(reportPath, stats);
   }
 
   await CSRReport.create({
@@ -4950,20 +5028,61 @@ app.put("/api/profile", requireAuth, async (request, response, next) => {
       name: request.body.name || request.user.name
     });
 
-    await ensureVolunteerProfileForUser(request.user.id, {
-      skills: request.body.skills,
-      technicalSkills: request.body.technicalSkills,
-      languages: request.body.languages,
-      medicalTraining: request.body.medicalTraining,
-      communicationStyle: request.body.communicationStyle,
-      preferredCauses: request.body.preferredCauses,
-      availability: request.body.availability,
-      baseLocation: request.body.baseLocation,
-      govIdLast4: request.body.govIdLast4,
-      emergencyContactName: request.body.emergencyContactName,
-      emergencyContactPhone: request.body.emergencyContactPhone,
-      vaccinationStatus: request.body.vaccinationStatus
-    });
+    if ((request.user.role === "csr_partner" || request.user.role === "corporate") && request.user.companyId) {
+      const company = await Company.findByPk(request.user.companyId);
+      if (company) {
+        const companyName = String(request.body.companyName || "").trim();
+        if (companyName && companyName !== company.name) {
+          const existing = await Company.findOne({ where: { name: companyName } });
+          if (existing) {
+            response.status(409).json({ error: "A company with that name already exists." });
+            return;
+          }
+          await company.update({ name: companyName });
+        }
+
+        let existingDetails = {};
+        if (company.details) {
+          if (typeof company.details === "object") {
+            existingDetails = company.details;
+          } else {
+            try {
+              existingDetails = JSON.parse(company.details);
+            } catch (e) {
+              existingDetails = { description: company.details };
+            }
+          }
+        }
+
+        const updatedDetails = {
+          ...existingDetails,
+          sector: request.body.sector !== undefined ? String(request.body.sector).trim() : existingDetails.sector,
+          budgetRange: request.body.budgetRange !== undefined ? String(request.body.budgetRange).trim() : existingDetails.budgetRange,
+          headquarters: request.body.headquarters !== undefined ? String(request.body.headquarters).trim() : existingDetails.headquarters,
+          website: request.body.website !== undefined ? String(request.body.website).trim() : existingDetails.website,
+          description: request.body.description !== undefined ? String(request.body.description).trim() : existingDetails.description
+        };
+
+        await company.update({
+          details: JSON.stringify(updatedDetails)
+        });
+      }
+    } else {
+      await ensureVolunteerProfileForUser(request.user.id, {
+        skills: request.body.skills,
+        technicalSkills: request.body.technicalSkills,
+        languages: request.body.languages,
+        medicalTraining: request.body.medicalTraining,
+        communicationStyle: request.body.communicationStyle,
+        preferredCauses: request.body.preferredCauses,
+        availability: request.body.availability,
+        baseLocation: request.body.baseLocation,
+        govIdLast4: request.body.govIdLast4,
+        emergencyContactName: request.body.emergencyContactName,
+        emergencyContactPhone: request.body.emergencyContactPhone,
+        vaccinationStatus: request.body.vaccinationStatus
+      });
+    }
 
     const refreshed = await getUserWithProfile(request.user.id);
     response.json({ user: serializeUser(refreshed, { includePrivate: true }) });
@@ -6274,6 +6393,101 @@ app.post(
     }
   }
 );
+
+app.get("/api/ngos", requireAuth, async (request, response, next) => {
+  try {
+    const ngos = await User.findAll({
+      where: { role: "ngo" },
+      attributes: ["id", "name", "email", "baseLocation"],
+      order: [["name", "ASC"]]
+    });
+
+    // Fetch task stats per NGO in one query
+    const companyId = request.user?.companyId || null;
+    const taskStatsRows = await sequelize.query(
+      `SELECT
+         ngo_id AS "ngoId",
+         COUNT(*)::int AS "totalTasks",
+         COUNT(CASE WHEN status = 'completed' THEN 1 END)::int AS "completedTasks",
+         COALESCE(SUM(people_served), 0)::int AS "peopleServed",
+         MAX(GREATEST(COALESCE(completed_at, created_at), created_at)) AS "latestActivity"
+       FROM tasks
+       WHERE ngo_id = ANY($1::text[])
+       ${companyId ? "AND company_id = $2" : ""}
+       GROUP BY ngo_id`,
+      {
+        bind: companyId
+          ? [ngos.map(n => n.id), companyId]
+          : [ngos.map(n => n.id)],
+        type: sequelize.QueryTypes.SELECT
+      }
+    );
+
+    const statsMap = {};
+    for (const row of taskStatsRows) {
+      statsMap[row.ngoId] = row;
+    }
+
+    response.json({
+      ngos: ngos.map(ngo => {
+        const stats = statsMap[ngo.id] || {
+          totalTasks: 0,
+          completedTasks: 0,
+          peopleServed: 0,
+          latestActivity: null
+        };
+        return {
+          id: ngo.id,
+          name: ngo.name,
+          email: ngo.email,
+          baseLocation: ngo.baseLocation,
+          totalTasks: stats.totalTasks,
+          completedTasks: stats.completedTasks,
+          peopleServed: stats.peopleServed,
+          latestActivity: stats.latestActivity
+        };
+      })
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/ngos", requireAuth, requireRole(["corporate", "admin"]), async (request, response, next) => {
+  try {
+    const { name, email, password, baseLocation } = request.body;
+    if (!name || !email || !password) {
+      response.status(400).json({ error: "Name, email, and password are required." });
+      return;
+    }
+
+    const existing = await User.findOne({ where: { email: email.toLowerCase() } });
+    if (existing) {
+      response.status(409).json({ error: "An account with that email already exists." });
+      return;
+    }
+
+    const ngoUser = await User.create({
+      id: createId("user"),
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      passwordHash: await bcrypt.hash(password, 10),
+      role: "ngo",
+      baseLocation: baseLocation ? baseLocation.trim() : null
+    });
+
+    response.status(201).json({
+      ngo: {
+        id: ngoUser.id,
+        name: ngoUser.name,
+        email: ngoUser.email,
+        baseLocation: ngoUser.baseLocation
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
 
 app.use((error, request, response, next) => {
   console.error(error);
