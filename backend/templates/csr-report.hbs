@@ -194,17 +194,10 @@
     <section class="section chart-row">
       <article class="story">
         <h2>Monthly Volunteer Hours</h2>
-        <div class="bars">
-          {{#each monthlyHours}}
-            <div class="bar">
-              <div class="bar-track">
-                <div class="bar-fill" style="height: {{height}}%;"></div>
-              </div>
-              <small>{{month}}</small>
-              <span>{{hours}} hrs</span>
-            </div>
-          {{/each}}
-        </div>
+        <div style="width:100%;">
+            <canvas id="csrAreaCanvas" width="600" height="240" aria-label="Volunteer hours chart"></canvas>
+            <div id="csrAreaLegend" style="margin-top:8px; font-size:12px; color: rgba(43,43,43,0.7);"></div>
+          </div>
       </article>
 
       <article class="story">
@@ -219,6 +212,19 @@
             </div>
           {{/each}}
         </div>
+      </article>
+    </section>
+
+    <section class="section chart-row" style="margin-top: 18px;">
+      <article class="story" style="flex: 0.65;">
+        <h2>Volunteer hours trend</h2>
+        <canvas id="csrAreaSmall" width="420" height="220" aria-hidden="true"></canvas>
+        <div id="csrAreaSmallLegend" style="margin-top:8px; font-size:12px; color: rgba(43,43,43,0.7);"></div>
+      </article>
+      <article class="story" style="flex: 0.35;">
+        <h2>Task breakdown</h2>
+        <canvas id="csrDonutCanvas" width="300" height="220" aria-label="Task breakdown chart"></canvas>
+        <div id="csrDonutLegend" style="margin-top:8px; font-size:12px; color: rgba(43,43,43,0.7);"></div>
       </article>
     </section>
 
@@ -277,5 +283,106 @@
     <div class="footer">
       HelpHive civic coordination platform · This report translates funding and volunteer support into ward-level evidence.
     </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <script>
+      (function () {
+        try {
+          const report = {{{rawData}}} || { monthlyHours: [], categorySummary: [], totals: {} };
+
+          function buildAreaChart(ctxId) {
+            const canvas = document.getElementById(ctxId);
+            const ctx = canvas?.getContext('2d');
+            if (!ctx || !report.monthlyHours || !report.monthlyHours.length) return null;
+            const labels = report.monthlyHours.map(m => m.month);
+            const data = report.monthlyHours.map(m => m.hours || 0);
+
+            // create a vertical gradient for the fill to improve visibility in PDF
+            const g = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            g.addColorStop(0, 'rgba(224,122,106,0.24)');
+            g.addColorStop(1, 'rgba(224,122,106,0.04)');
+
+            const border = 'rgba(224,122,106,0.98)';
+
+            const chart = new Chart(ctx, {
+              type: 'line',
+              data: {
+                labels,
+                datasets: [{
+                  label: 'Volunteer hours',
+                  data,
+                  fill: true,
+                  backgroundColor: g,
+                  borderColor: border,
+                  borderWidth: 3,
+                  tension: 0.45,
+                  pointRadius: 5,
+                  pointBackgroundColor: border,
+                  pointBorderColor: '#fff',
+                  pointHoverRadius: 8
+                }]
+              },
+              options: {
+                responsive: false,
+                plugins: { legend: { display: false } },
+                scales: { x: { grid: { display: false } }, y: { beginAtZero: true } },
+                elements: { line: { borderJoinStyle: 'round', borderCapStyle: 'round' } }
+              }
+            });
+
+            // Render a simple legend below the canvas
+            try {
+              const legendContainer = document.getElementById(ctxId === 'csrAreaCanvas' ? 'csrAreaLegend' : 'csrAreaSmallLegend');
+              if (legendContainer) {
+                legendContainer.innerHTML = `<span style="display:inline-flex;align-items:center;gap:8px;"><span style="width:12px;height:12px;background:${border};display:inline-block;border-radius:2px;border:1px solid rgba(0,0,0,0.06);"></span>${chart.data.datasets[0].label}</span>`;
+              }
+            } catch (e) { /* ignore legend failures */ }
+
+            return chart;
+          }
+
+          function buildDonutChart() {
+            const canvas = document.getElementById('csrDonutCanvas');
+            const ctx = canvas?.getContext('2d');
+            if (!ctx || !report.categorySummary) return null;
+            const labels = report.categorySummary.map(c => c.label);
+            const data = report.categorySummary.map(c => c.value || 0);
+            const total = data.reduce((sum, value) => sum + value, 0) || 1;
+            const colors = ['#e07a6a','#6aa89e','#bda08a','#8e7cc3','#6cacd8'];
+
+            const chart = new Chart(ctx, {
+              type: 'doughnut',
+              data: { labels, datasets: [{ data, backgroundColor: labels.map((_,i)=>colors[i%colors.length]) }] },
+              options: { responsive: false, plugins: { legend: { display: false } }, cutout: '60%' }
+            });
+
+            // Build textual legend with color swatches and counts
+            try {
+              const legendContainer = document.getElementById('csrDonutLegend');
+              if (legendContainer) {
+                legendContainer.innerHTML = labels.map((lbl, i) => {
+                  const val = data[i] || 0;
+                  const percent = ((val / total) * 100).toFixed(1);
+                  const color = colors[i % colors.length];
+                  return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;"><span style="width:12px;height:12px;border-radius:3px;background:${color};display:inline-block;border:1px solid rgba(0,0,0,0.06);"></span><span>${lbl}</span><span style="margin-left:auto;color:rgba(43,43,43,0.6);">${val} (${percent}%)</span></div>`;
+                }).join('');
+              }
+            } catch (e) { /* ignore legend failures */ }
+
+            return chart;
+          }
+
+          // build larger and small area charts if canvases exist
+          buildAreaChart('csrAreaCanvas');
+          buildAreaChart('csrAreaSmall');
+          buildDonutChart();
+
+          // Signal Puppeteer that charts are ready
+          window.__helphiveChartsReady = true;
+        } catch (e) {
+          console.warn('Chart rendering failed', e);
+          window.__helphiveChartsReady = true;
+        }
+      })();
+    </script>
   </body>
 </html>

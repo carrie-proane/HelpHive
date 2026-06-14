@@ -4438,6 +4438,64 @@ async function buildCSRStats(companyId, filters = {}) {
     return null;
   }
 
+  const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+  function normalizeMonthName(raw) {
+    const value = String(raw || "").trim();
+    if (!value) {
+      return "";
+    }
+
+    const abbreviated = value.slice(0, 3);
+    return abbreviated.charAt(0).toUpperCase() + abbreviated.slice(1).toLowerCase();
+  }
+
+  function padMonthlyHours(series = []) {
+    const normalizedSeries = Array.isArray(series)
+      ? series.map((entry) => ({
+        month: normalizeMonthName(entry.month),
+        hours: Number(entry.hours || 0)
+      }))
+      : [];
+
+    if (normalizedSeries.length === 0) {
+      return [];
+    }
+
+    if (normalizedSeries.length >= 4) {
+      return normalizedSeries;
+    }
+
+    const lookup = normalizedSeries.reduce((accumulator, entry) => {
+      accumulator[entry.month] = entry.hours;
+      return accumulator;
+    }, {});
+
+    let firstIdx = MONTH_NAMES.indexOf(normalizedSeries[0].month);
+    if (firstIdx === -1) {
+      firstIdx = 0;
+    }
+
+    let lastIdx = MONTH_NAMES.indexOf(normalizedSeries[normalizedSeries.length - 1].month);
+    if (lastIdx === -1) {
+      lastIdx = firstIdx;
+    }
+
+    const startIdx = Math.max(0, firstIdx - 2);
+    const endIdx = Math.min(11, lastIdx + 2);
+    const paddedSeries = [];
+
+    for (let index = startIdx; index <= endIdx; index += 1) {
+      const month = MONTH_NAMES[index];
+      paddedSeries.push({
+        month,
+        hours: lookup[month] || 0
+      });
+    }
+
+    return paddedSeries;
+  }
+
   const dateRange = buildDateRange(filters, filters);
   const taskWhere = {
     companyId,
@@ -4475,7 +4533,7 @@ async function buildCSRStats(companyId, filters = {}) {
     tasksFunded: completedTasks.length
   };
 
-  const monthlyHours = contributions.reduce((accumulator, contribution) => {
+  const rawMonthlyHours = contributions.reduce((accumulator, contribution) => {
     const month = contribution.date.toLocaleDateString("en-IN", { month: "short" });
     const existing = accumulator.find((item) => item.month === month);
     const hours = Number(contribution.volunteerHours || 0);
@@ -4488,6 +4546,8 @@ async function buildCSRStats(companyId, filters = {}) {
     accumulator.push({ month, hours });
     return accumulator;
   }, []);
+
+  const monthlyHours = padMonthlyHours(rawMonthlyHours);
 
   const maxHours = Math.max(...monthlyHours.map((entry) => entry.hours), 1);
   monthlyHours.forEach((entry) => {
@@ -4649,7 +4709,13 @@ async function renderCSRHtml(stats) {
     categorySummary: stats.categorySummary,
     outcomeMetrics: stats.outcomeMetrics,
     frameworkAlignment: stats.frameworkAlignment,
-    testimonials: stats.testimonials
+    testimonials: stats.testimonials,
+    // raw JSON used by in-template Chart.js rendering (unescaped)
+    rawData: JSON.stringify({
+      monthlyHours: stats.monthlyHours || [],
+      categorySummary: stats.categorySummary || [],
+      totals: stats.totals || {}
+    })
   });
 }
 
@@ -4687,6 +4753,127 @@ async function writeFallbackCSRReport(reportPath, stats) {
     );
   }
 
+  // Draw a smooth area curve for monthlyHours
+  try {
+    const months = Array.isArray(stats.monthlyHours) ? stats.monthlyHours : [];
+    if (months.length) {
+      doc.addPage({ margin: 48 });
+      doc.fontSize(18).text('Volunteer hours trend', { underline: false });
+      doc.moveDown(0.2);
+
+      const margin = 48;
+      const contentWidth = doc.page.width - margin * 2;
+      const chartWidth = Math.min(520, contentWidth);
+      const chartHeight = 160;
+      const chartX = margin;
+      const chartY = doc.y + 8;
+
+      // normalize month names to 3-letter abbrev and pad sparse series (like frontend)
+      const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      function normalizeMonthName(raw) {
+        const s = String(raw || '').trim();
+        if (!s) return '';
+        const abbr = s.slice(0,3);
+        return abbr.charAt(0).toUpperCase() + abbr.slice(1).toLowerCase();
+      }
+
+      const lookup = {};
+      months.forEach(m => {
+        const name = normalizeMonthName(m.month || m.label || '');
+        lookup[name] = Number(m.hours || 0);
+      });
+
+      let paddedSeries = months.map(m => ({ month: normalizeMonthName(m.month || m.label || ''), hours: Number(m.hours || 0) }));
+      if (months.length > 0 && months.length < 4) {
+        const first = normalizeMonthName(months[0].month || months[0].label || '');
+        const last = normalizeMonthName(months[months.length - 1].month || months[months.length - 1].label || '');
+        let firstIdx = MONTH_NAMES.indexOf(first);
+        if (firstIdx === -1) firstIdx = 0;
+        let lastIdx = MONTH_NAMES.indexOf(last);
+        if (lastIdx === -1) lastIdx = firstIdx;
+        const startIdx = Math.max(0, firstIdx - 2);
+        const endIdx = Math.min(11, lastIdx + 2);
+        paddedSeries = [];
+        for (let i = startIdx; i <= endIdx; i++) {
+          const mName = MONTH_NAMES[i];
+          paddedSeries.push({ month: mName, hours: lookup[mName] || 0 });
+        }
+      }
+
+      const values = paddedSeries.map(m => Number(m.hours || 0));
+      const maxVal = Math.max(...values, 1);
+      const stepX = chartWidth / Math.max(paddedSeries.length - 1, 1);
+      // center chart horizontally within content width
+      const chartXCentered = chartX + Math.max(0, (contentWidth - chartWidth) / 2);
+      const points = paddedSeries.map((m, i) => ({
+        x: chartXCentered + i * stepX,
+        y: chartY + chartHeight - (Number(m.hours || 0) / maxVal) * chartHeight,
+        label: String(m.month || '')
+      }));
+
+      // draw axes labels
+      doc.fontSize(10).fillColor('rgba(43,43,43,0.7)');
+      doc.text(`${Math.round(maxVal)} hrs`, chartXCentered, chartY - 6);
+      doc.text('0 hrs', chartXCentered, chartY + chartHeight + 4);
+
+      // draw grid lines
+      doc.save();
+      doc.lineWidth(0.5).strokeColor('rgba(43,43,43,0.06)');
+      const gridSteps = 4;
+      for (let i = 0; i <= gridSteps; i++) {
+        const y = chartY + (chartHeight / gridSteps) * i;
+        doc.moveTo(chartXCentered, y).lineTo(chartXCentered + chartWidth, y).stroke();
+      }
+      doc.restore();
+
+      // build smooth path using cubic Bezier through midpoint control points
+      doc.save();
+      // area fill path
+      doc.moveTo(points[0].x, points[0].y);
+      for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[i];
+        const p1 = points[i + 1];
+        const midX = (p0.x + p1.x) / 2;
+        doc.bezierCurveTo(midX, p0.y, midX, p1.y, p1.x, p1.y);
+      }
+      // close path to baseline
+      doc.lineTo(points[points.length - 1].x, chartY + chartHeight);
+      doc.lineTo(points[0].x, chartY + chartHeight);
+      doc.closePath();
+      // fill area with translucent coral
+      doc.fillColor('#e07a6a').opacity(0.12).fill();
+      doc.opacity(1);
+
+      // stroke the curve path again for border
+      doc.moveTo(points[0].x, points[0].y);
+      for (let i = 0; i < points.length - 1; i++) {
+        const p0 = points[i];
+        const p1 = points[i + 1];
+        const midX = (p0.x + p1.x) / 2;
+        doc.bezierCurveTo(midX, p0.y, midX, p1.y, p1.x, p1.y);
+      }
+      doc.lineWidth(2.5).strokeColor('#b85f54').stroke();
+
+      // draw point markers
+      for (const p of points) {
+        doc.circle(p.x, p.y, 5).fillColor('#ffffff').fill();
+        doc.circle(p.x, p.y, 3).fillColor('#e07a6a').fill();
+      }
+
+      // draw month labels
+      doc.fontSize(10).fillColor('rgba(43,43,43,0.72)');
+      for (const p of points) {
+        doc.text(p.label, p.x - 14, chartY + chartHeight + 6, { width: 28, align: 'center' });
+      }
+
+      doc.restore();
+
+      doc.moveDown(10);
+    }
+  } catch (err) {
+    console.warn('Failed to draw fallback curve in PDF:', err.message || err);
+  }
+
   doc.end();
   await new Promise((resolve, reject) => {
     stream.on("finish", resolve);
@@ -4712,6 +4899,13 @@ async function generateCSRReport(companyId, filters = {}) {
     try {
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: "networkidle0" });
+      // Wait for in-page Chart.js rendering to finish (template sets window.__helphiveChartsReady)
+      try {
+        await page.waitForFunction('window.__helphiveChartsReady === true', { timeout: 5000 });
+      } catch (err) {
+        // If charts don't signal readiness, continue anyway; PDF will still be generated.
+        console.warn('Charts readiness timed out, continuing to generate PDF');
+      }
       await page.pdf({
         path: reportPath,
         format: "A4",
