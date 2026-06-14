@@ -2675,38 +2675,352 @@ async function initImpactPage(currentUser) {
     }
   }
 
+  let _csrAreaChart = null;
+  let _csrDonutChart = null;
+
   function renderImpactChart(report) {
     if (!chartPanel) {
       return;
     }
 
     const series = report.monthlyHours || [];
-    if (!series.length) {
+    const totals = report.totals || {};
+    const catSummary = report.categorySummary || [];
+
+    if (!series.length && !catSummary.length) {
+      if (_csrAreaChart) { _csrAreaChart.destroy(); _csrAreaChart = null; }
+      if (_csrDonutChart) { _csrDonutChart.destroy(); _csrDonutChart = null; }
       chartPanel.innerHTML = `
         <div class="chart-placeholder">
-          No monthly volunteer-hour data is available for the selected range yet.
+          No volunteer-hour data is available for the selected range yet.
         </div>
       `;
       return;
     }
 
+    if (_csrAreaChart) { _csrAreaChart.destroy(); _csrAreaChart = null; }
+    if (_csrDonutChart) { _csrDonutChart.destroy(); _csrDonutChart = null; }
+
+    /* ── Pad sparse monthly data with surrounding empty months for visual context ── */
+    const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    let paddedSeries = series;
+    if (series.length > 0 && series.length < 4) {
+      const firstMonthStr = series[0].month;
+      let firstIdx = MONTH_NAMES.indexOf(firstMonthStr);
+      if (firstIdx === -1) firstIdx = 0;
+      const startIdx = Math.max(0, firstIdx - 2);
+      const lastMonthStr = series[series.length - 1].month;
+      let lastIdx = MONTH_NAMES.indexOf(lastMonthStr);
+      if (lastIdx === -1) lastIdx = firstIdx;
+      const endIdx = Math.min(11, lastIdx + 2);
+      const lookup = {};
+      series.forEach(function (e) { lookup[e.month] = e.hours; });
+      paddedSeries = [];
+      for (let i = startIdx; i <= endIdx; i++) {
+        paddedSeries.push({ month: MONTH_NAMES[i], hours: lookup[MONTH_NAMES[i]] || 0 });
+      }
+    }
+
+    /* ── Donut palette ── */
+    const DONUT_COLORS = [
+      "rgba(224, 122, 106, 0.88)",
+      "rgba(106, 168, 158, 0.88)",
+      "rgba(186, 148, 128, 0.88)",
+      "rgba(142, 124, 195, 0.82)",
+      "rgba(108, 172, 216, 0.82)",
+      "rgba(218, 176, 98, 0.82)",
+      "rgba(168, 132, 168, 0.78)"
+    ];
+
+    /* ── Build DOM skeleton ── */
     chartPanel.innerHTML = `
-      <div class="csr-chart-grid">
-        ${series
-        .map(
-          (entry) => `
-              <div class="csr-chart-bar">
-                <div class="csr-chart-track">
-                  <div class="csr-chart-fill" style="height: ${Math.max(entry.height || 0, 18)}%;"></div>
-                </div>
-                <div class="csr-chart-label">${entry.month}</div>
-                <div class="csr-chart-value">${entry.hours} hrs</div>
-              </div>
-            `
-        )
-        .join("")}
+      <div class="impact-viz">
+        <div class="impact-viz__stats">
+          <div class="impact-viz__stat">
+            <span class="impact-viz__stat-value" data-countup="${totals.volunteerHours || 0}">0</span>
+            <span class="impact-viz__stat-label">Volunteer hrs</span>
+          </div>
+          <div class="impact-viz__stat-divider"></div>
+          <div class="impact-viz__stat">
+            <span class="impact-viz__stat-value" data-countup="${totals.tasksFunded || 0}">0</span>
+            <span class="impact-viz__stat-label">Tasks funded</span>
+          </div>
+          <div class="impact-viz__stat-divider"></div>
+          <div class="impact-viz__stat">
+            <span class="impact-viz__stat-value" data-countup="${totals.peopleServed || 0}">0</span>
+            <span class="impact-viz__stat-label">People served</span>
+          </div>
+          <div class="impact-viz__stat-divider"></div>
+          <div class="impact-viz__stat">
+            <span class="impact-viz__stat-value" data-countup="${totals.funds || 0}" data-prefix="₹">₹0</span>
+            <span class="impact-viz__stat-label">Funds tracked</span>
+          </div>
+        </div>
+        <div class="impact-viz__charts">
+          <div class="impact-viz__area-wrap">
+            <div class="impact-viz__area-header">
+              <span class="impact-viz__area-title">Volunteer hours trend</span>
+              <span class="impact-viz__area-badge">${paddedSeries.length} months</span>
+            </div>
+            <div class="impact-viz__area-canvas-wrap">
+              <canvas id="csrImpactCanvas"></canvas>
+            </div>
+          </div>
+          ${catSummary.length ? `
+          <div class="impact-viz__donut-wrap">
+            <div class="impact-viz__area-header">
+              <span class="impact-viz__area-title">Task breakdown</span>
+            </div>
+            <div class="impact-viz__donut-canvas-wrap">
+              <canvas id="csrDonutCanvas"></canvas>
+            </div>
+            <div class="impact-viz__donut-legend" id="csrDonutLegend"></div>
+          </div>` : ""}
+        </div>
       </div>
     `;
+
+    /* ── Count-up animation ── */
+    chartPanel.querySelectorAll("[data-countup]").forEach(function (el) {
+      const target = Number(el.dataset.countup) || 0;
+      const prefix = el.dataset.prefix || "";
+      const duration = 1100;
+      const start = performance.now();
+      function tick(now) {
+        const elapsed = now - start;
+        const progress = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        const current = Math.round(eased * target);
+        el.textContent = prefix + current.toLocaleString("en-IN");
+        if (progress < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    });
+
+    const fontFamily = "'Manrope', system-ui, -apple-system, sans-serif";
+
+    /* ── Crosshair hover plugin ── */
+    const crosshairPlugin = {
+      id: "csrCrosshair",
+      afterDraw: function (chart) {
+        if (!chart.tooltip || !chart.tooltip.getActiveElements().length) return;
+        const activePoint = chart.tooltip.getActiveElements()[0];
+        const ctx2 = chart.ctx;
+        const x = activePoint.element.x;
+        const topY = chart.scales.y.top;
+        const bottomY = chart.scales.y.bottom;
+        ctx2.save();
+        ctx2.beginPath();
+        ctx2.moveTo(x, topY);
+        ctx2.lineTo(x, bottomY);
+        ctx2.lineWidth = 1;
+        ctx2.strokeStyle = "rgba(224, 122, 106, 0.28)";
+        ctx2.setLineDash([6, 4]);
+        ctx2.stroke();
+        ctx2.restore();
+
+        /* Glow dot */
+        const y = activePoint.element.y;
+        ctx2.save();
+        ctx2.beginPath();
+        ctx2.arc(x, y, 12, 0, Math.PI * 2);
+        ctx2.fillStyle = "rgba(224, 122, 106, 0.12)";
+        ctx2.fill();
+        ctx2.restore();
+      }
+    };
+
+    /* ── Area chart ── */
+    const areaCanvas = document.getElementById("csrImpactCanvas");
+    if (areaCanvas && typeof Chart !== "undefined" && paddedSeries.length) {
+      const aCtx = areaCanvas.getContext("2d");
+
+      const gFill = aCtx.createLinearGradient(0, 0, 0, 220);
+      gFill.addColorStop(0, "rgba(224, 122, 106, 0.36)");
+      gFill.addColorStop(0.45, "rgba(196, 148, 128, 0.14)");
+      gFill.addColorStop(1, "rgba(106, 168, 158, 0.01)");
+
+      const gLine = aCtx.createLinearGradient(0, 0, areaCanvas.parentElement.clientWidth || 400, 0);
+      gLine.addColorStop(0, "rgba(224, 122, 106, 0.95)");
+      gLine.addColorStop(0.45, "rgba(196, 140, 116, 0.95)");
+      gLine.addColorStop(1, "rgba(106, 168, 158, 0.95)");
+
+      _csrAreaChart = new Chart(aCtx, {
+        type: "line",
+        plugins: [crosshairPlugin],
+        data: {
+          labels: paddedSeries.map(function (e) { return e.month; }),
+          datasets: [{
+            label: "Volunteer hours",
+            data: paddedSeries.map(function (e) { return e.hours; }),
+            fill: true,
+            backgroundColor: gFill,
+            borderColor: gLine,
+            borderWidth: 3,
+            tension: 0.45,
+            pointBackgroundColor: function (ctx) {
+              var val = ctx.parsed ? ctx.parsed.y : 0;
+              return val > 0 ? "rgba(224, 122, 106, 1)" : "rgba(224, 122, 106, 0.3)";
+            },
+            pointBorderColor: "rgba(255,255,255,0.95)",
+            pointBorderWidth: 2.5,
+            pointRadius: function (ctx) {
+              var val = ctx.parsed ? ctx.parsed.y : 0;
+              return val > 0 ? 6 : 3;
+            },
+            pointHoverRadius: 10,
+            pointHoverBackgroundColor: "rgba(224, 122, 106, 1)",
+            pointHoverBorderColor: "#fff",
+            pointHoverBorderWidth: 3
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: {
+            duration: 1200,
+            easing: "easeOutQuart",
+            delay: function (ctx) { return ctx.dataIndex * 80; }
+          },
+          interaction: { mode: "index", intersect: false },
+          layout: { padding: { top: 10, right: 16, bottom: 4, left: 4 } },
+          scales: {
+            x: {
+              grid: { display: false },
+              border: { display: false },
+              ticks: {
+                color: "rgba(43,43,43,0.52)",
+                font: { family: fontFamily, size: 11.5, weight: "600" },
+                padding: 10
+              }
+            },
+            y: {
+              beginAtZero: true,
+              grid: { color: "rgba(43,43,43,0.05)", drawTicks: false },
+              border: { display: false, dash: [4, 4] },
+              ticks: {
+                color: "rgba(43,43,43,0.40)",
+                font: { family: fontFamily, size: 11, weight: "500" },
+                padding: 12,
+                maxTicksLimit: 6,
+                callback: function (v) { return v + " hrs"; }
+              }
+            }
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              enabled: true,
+              backgroundColor: "rgba(34,30,26,0.94)",
+              titleColor: "#fff",
+              bodyColor: "rgba(255,255,255,0.86)",
+              titleFont: { family: fontFamily, size: 13, weight: "700" },
+              bodyFont: { family: fontFamily, size: 12, weight: "500" },
+              padding: { top: 12, right: 16, bottom: 12, left: 16 },
+              cornerRadius: 16,
+              displayColors: false,
+              caretSize: 7,
+              caretPadding: 10,
+              callbacks: {
+                title: function (items) { return items[0] ? items[0].label : ""; },
+                label: function (item) { return item.parsed.y + " volunteer hours logged"; }
+              }
+            }
+          }
+        }
+      });
+    }
+
+    /* ── Donut chart ── */
+    var donutCanvas = document.getElementById("csrDonutCanvas");
+    var donutLegend = document.getElementById("csrDonutLegend");
+    if (donutCanvas && catSummary.length && typeof Chart !== "undefined") {
+      var dCtx = donutCanvas.getContext("2d");
+      var totalTasks = catSummary.reduce(function (s, c) { return s + c.value; }, 0);
+
+      /* Center label plugin */
+      var centerTextPlugin = {
+        id: "csrCenterText",
+        afterDraw: function (chart) {
+          var width = chart.width;
+          var height = chart.height;
+          var c = chart.ctx;
+          c.save();
+          c.textAlign = "center";
+          c.textBaseline = "middle";
+          var centerX = width / 2;
+          var centerY = height / 2;
+          c.font = "800 " + Math.round(height * 0.16) + "px " + fontFamily;
+          c.fillStyle = "rgba(43,43,43,0.88)";
+          c.fillText(totalTasks, centerX, centerY - 6);
+          c.font = "600 " + Math.round(height * 0.07) + "px " + fontFamily;
+          c.fillStyle = "rgba(43,43,43,0.48)";
+          c.fillText("tasks", centerX, centerY + Math.round(height * 0.1));
+          c.restore();
+        }
+      };
+
+      _csrDonutChart = new Chart(dCtx, {
+        type: "doughnut",
+        plugins: [centerTextPlugin],
+        data: {
+          labels: catSummary.map(function (c) { return c.label; }),
+          datasets: [{
+            data: catSummary.map(function (c) { return c.value; }),
+            backgroundColor: catSummary.map(function (_, i) { return DONUT_COLORS[i % DONUT_COLORS.length]; }),
+            borderColor: "rgba(255,255,255,0.9)",
+            borderWidth: 3,
+            borderRadius: 6,
+            hoverBorderColor: "#fff",
+            hoverBorderWidth: 4,
+            hoverOffset: 8
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: "66%",
+          animation: {
+            animateRotate: true,
+            duration: 1000,
+            easing: "easeOutQuart"
+          },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: "rgba(34,30,26,0.94)",
+              titleColor: "#fff",
+              bodyColor: "rgba(255,255,255,0.86)",
+              titleFont: { family: fontFamily, size: 13, weight: "700" },
+              bodyFont: { family: fontFamily, size: 12, weight: "500" },
+              padding: { top: 10, right: 14, bottom: 10, left: 14 },
+              cornerRadius: 14,
+              displayColors: true,
+              boxWidth: 10,
+              boxHeight: 10,
+              boxPadding: 6,
+              callbacks: {
+                label: function (item) {
+                  var pct = totalTasks ? Math.round((item.parsed / totalTasks) * 100) : 0;
+                  return " " + item.label + ": " + item.parsed + " (" + pct + "%)";
+                }
+              }
+            }
+          }
+        }
+      });
+
+      /* Custom legend */
+      if (donutLegend) {
+        donutLegend.innerHTML = catSummary.map(function (c, i) {
+          return '<div class="impact-viz__legend-item">' +
+            '<span class="impact-viz__legend-dot" style="background:' + DONUT_COLORS[i % DONUT_COLORS.length] + '"></span>' +
+            '<span class="impact-viz__legend-text">' + c.label + '</span>' +
+            '<span class="impact-viz__legend-count">' + c.value + '</span>' +
+          '</div>';
+        }).join("");
+      }
+    }
   }
 
   async function loadReport() {

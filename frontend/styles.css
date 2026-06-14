@@ -4301,10 +4301,210 @@ body.modal-open {
 
 .csr-chart-panel {
   margin-top: 20px;
-  min-height: 220px;
   border-radius: 24px;
-  background: rgba(255, 255, 255, 0.22);
-  padding: 18px;
+  background: rgba(255, 255, 255, 0.32);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  padding: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  position: relative;
+}
+
+/* ── Impact Visualization Dashboard ── */
+
+.impact-viz {
+  display: grid;
+  gap: 22px;
+}
+
+.impact-viz__stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0;
+  padding: 16px 22px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(224, 122, 106, 0.08), rgba(106, 168, 158, 0.06));
+  border: 1px solid rgba(255, 255, 255, 0.52);
+  flex-wrap: wrap;
+}
+
+.impact-viz__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 80px;
+  padding: 4px 0;
+}
+
+.impact-viz__stat-value {
+  font-size: 1.5rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: rgba(43, 43, 43, 0.9);
+  line-height: 1.1;
+}
+
+.impact-viz__stat-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(43, 43, 43, 0.44);
+}
+
+.impact-viz__stat-divider {
+  width: 1px;
+  height: 32px;
+  background: rgba(43, 43, 43, 0.08);
+  flex-shrink: 0;
+}
+
+.impact-viz__charts {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 18px;
+  align-items: stretch;
+}
+
+.impact-viz__area-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.impact-viz__area-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.impact-viz__area-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: rgba(43, 43, 43, 0.68);
+}
+
+.impact-viz__area-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(106, 168, 158, 0.12);
+  color: rgba(75, 132, 109, 0.88);
+  letter-spacing: 0.01em;
+}
+
+.impact-viz__area-canvas-wrap {
+  position: relative;
+  height: 200px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.48);
+  padding: 10px 8px 6px;
+}
+
+.impact-viz__area-canvas-wrap canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.impact-viz__donut-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 200px;
+  flex-shrink: 0;
+}
+
+.impact-viz__donut-canvas-wrap {
+  position: relative;
+  height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.impact-viz__donut-canvas-wrap canvas {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.impact-viz__donut-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.impact-viz__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: rgba(43, 43, 43, 0.64);
+}
+
+.impact-viz__legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.impact-viz__legend-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.impact-viz__legend-count {
+  font-weight: 800;
+  color: rgba(43, 43, 43, 0.82);
+  font-size: 0.78rem;
+}
+
+@media (max-width: 680px) {
+  .impact-viz__charts {
+    grid-template-columns: 1fr;
+  }
+
+  .impact-viz__donut-wrap {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .impact-viz__donut-canvas-wrap {
+    width: 120px;
+    height: 120px;
+    flex-shrink: 0;
+  }
+
+  .impact-viz__donut-legend {
+    flex: 1;
+  }
+
+  .impact-viz__stats {
+    gap: 6px;
+    padding: 14px 16px;
+  }
+
+  .impact-viz__stat-value {
+    font-size: 1.2rem;
+  }
+
+  .impact-viz__stat-divider {
+    height: 24px;
+  }
 }
 
 .csr-chart-grid {
