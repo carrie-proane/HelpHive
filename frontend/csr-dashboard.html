@@ -47,41 +47,6 @@
       </header>
 
       <main>
-        <section class="page-hero fade-in">
-          <div class="page-hero-panel">
-            <div class="page-hero-grid slim">
-              <div class="page-hero-copy">
-                <span class="eyebrow">CSR Partner</span>
-                <h1>See support translate into ward-level movement.</h1>
-                <p>
-                  This dashboard keeps partner reporting focused on live outcomes,
-                  downloadable evidence, and trend lines tied back to the field.
-                </p>
-                <div class="hero-actions">
-                  <a class="cta-button" href="#csrOutcomes">Open partner metrics</a>
-                  <a class="ghost-button" href="./profile.html">View linked profile</a>
-                </div>
-              </div>
-              <div class="page-hero-visual">
-                <article class="visual-card lavender">
-                  <span class="side-kicker">Partner view</span>
-                  <ul class="timeline-list">
-                    <li><span>Metrics</span><strong>Volunteer hours, funds, reach</strong></li>
-                    <li><span>Narrative</span><strong>Operational story from live data</strong></li>
-                    <li><span>Receipt</span><strong>Export-ready contribution evidence</strong></li>
-                  </ul>
-                </article>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Tab Bar -->
-        <div class="tab-bar" style="width: var(--container); margin: 34px auto 0; display: flex; gap: 12px; border-bottom: 1px solid var(--surface-border); padding-bottom: 12px; box-sizing: border-box;">
-          <button id="btnDashboardTab" class="cta-button" type="button" style="margin: 0; min-height: 40px; padding: 6px 16px;">Dashboard</button>
-          <button id="btnPartnersTab" class="ghost-button" type="button" style="margin: 0; min-height: 40px; padding: 6px 16px;">Partners</button>
-        </div>
-
         <div id="tabDashboardContent">
           <section class="section fade-in" id="csrOutcomes">
             <div class="sheet lavender impact-sheet">
@@ -115,7 +80,7 @@
               <article class="dashboard-shell sand">
                 <form id="csrFilterForm" class="form-grid">
                   <label>
-                    Company
+                    NGO Partner
                     <select id="csrCompanyFilter" name="companyId"></select>
                   </label>
                   <label>
@@ -224,14 +189,14 @@
 
               <article class="detail-card sand" style="flex: 1.5; min-width: 350px;">
                 <h3>Active NGO List</h3>
-                <div style="margin-top: 12px; margin-bottom: 16px; position: relative;">
+                <div class="ngo-search-shell">
                   <input
+                    class="ngo-search-input"
                     id="ngoSearchInput"
                     type="text"
                     placeholder="Search by name or location..."
-                    style="width: 100%; padding: 10px 14px 10px 38px; border: 1px solid var(--surface-border); border-radius: 8px; background: var(--surface-background); font-size: 0.9rem; color: var(--text-primary); outline: none; transition: border-color 0.2s;"
                   />
-                  <svg style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; opacity: 0.45; pointer-events: none;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  <svg class="ngo-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 </div>
                 <div id="ngoList" class="task-stack" style="margin-top: 0;">
                   <div class="empty-state"><p>Loading NGO partners...</p></div>

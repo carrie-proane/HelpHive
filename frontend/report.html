@@ -99,10 +99,12 @@
                   </label>
                   <p class="helper-copy">Select one or more survey photos, then remove any you do not want before upload.</p>
                   <div class="image-preview-grid" id="ocrImagePreview" aria-live="polite"></div>
-                  <button class="cta-button" type="submit">Run OCR</button>
+                  <button class="cta-button" id="ocrSubmitButton" type="submit" disabled>Run OCR</button>
+                  <div class="ocr-progress-panel hidden" id="ocrProgressPanel" aria-live="polite"></div>
+                  <p class="ocr-inline-error hidden" id="ocrUploadError" role="alert"></p>
                 </form>
-                <div class="result-block" id="ocrResult">
-                  <p class="muted">OCR output will appear here after upload.</p>
+                <div class="result-block ocr-result-shell" id="ocrResult">
+                  <p class="muted">Upload a survey batch to see the OCR summary here.</p>
                 </div>
               </article>
 
@@ -160,6 +162,15 @@
         <span>HelpHive intake desk</span>
         <span>OCR, voice, and manual reporting for NGO and admin roles</span>
       </footer>
+    </div>
+
+    <div class="ocr-result-modal hidden" id="ocrResultModal" aria-hidden="true">
+      <div class="ocr-result-modal__dialog" role="dialog" aria-modal="false" aria-labelledby="ocrResultModalTitle">
+        <button class="ocr-result-modal__close" id="ocrResultModalClose" type="button" aria-label="Close extracted result">
+          ×
+        </button>
+        <div class="ocr-result-modal__content" id="ocrResultModalContent"></div>
+      </div>
     </div>
 
     <script src="./main.js"></script>
