@@ -138,8 +138,21 @@ async function createSchema() {
       task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
       volunteer_id INTEGER NOT NULL REFERENCES volunteers(id) ON DELETE CASCADE,
       assigned_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'completed', 'cancelled')),
+      status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active', 'completed', 'cancelled', 'declined')),
       match_score NUMERIC(10, 3) NOT NULL DEFAULT 0
+    )
+  `);
+
+  await query(`
+    CREATE TABLE IF NOT EXISTS dispatch_outcomes (
+      id VARCHAR PRIMARY KEY,
+      task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+      volunteer_id INTEGER REFERENCES volunteers(id) ON DELETE SET NULL,
+      assignment_id INTEGER REFERENCES assignments(id) ON DELETE SET NULL,
+      outcome VARCHAR(32) NOT NULL CHECK (outcome IN ('accepted', 'declined', 'completed', 'cancelled', 'false')),
+      notes TEXT,
+      correction JSONB NOT NULL DEFAULT '{}'::jsonb,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
 
@@ -221,6 +234,12 @@ async function createSchema() {
   );
   await query(
     "CREATE UNIQUE INDEX IF NOT EXISTS assignments_task_volunteer_uidx ON assignments (task_id, volunteer_id)"
+  );
+  await query(
+    "CREATE INDEX IF NOT EXISTS dispatch_outcomes_task_idx ON dispatch_outcomes (task_id, created_at DESC)"
+  );
+  await query(
+    "CREATE INDEX IF NOT EXISTS dispatch_outcomes_volunteer_idx ON dispatch_outcomes (volunteer_id, created_at DESC)"
   );
 }
 

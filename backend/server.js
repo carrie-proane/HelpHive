@@ -1,5 +1,6 @@
 const path = require("path");
 const fs = require("fs");
+const http = require("http");
 const dotenv = require("dotenv");
 const express = require("express");
 const cors = require("cors");
@@ -16,6 +17,8 @@ const twilio = require("twilio");
 const Tesseract = require("tesseract.js");
 const h3 = require("h3-js");
 const { Sequelize, DataTypes, Op } = require("sequelize");
+const { WebSocketServer } = require("ws");
+const { createClient } = require("redis");
 const {
   evaluateTaskStatus,
   updateTrustScore
@@ -90,6 +93,14 @@ const DISPATCH_AVERAGE_SPEED_KMPH = Number(process.env.DISPATCH_AVERAGE_SPEED_KM
 const ROUTING_ENGINE = String(process.env.ROUTING_ENGINE || "osrm").trim().toLowerCase();
 const ROUTING_ENGINE_URL = String(process.env.ROUTING_ENGINE_URL || "").replace(/\/+$/, "");
 const ROUTING_ENGINE_API_KEY = process.env.ROUTING_ENGINE_API_KEY || "";
+const REDIS_URL = process.env.REDIS_URL || (isRunningInDocker() ? "redis://redis:6379" : "redis://127.0.0.1:6379");
+const DISPATCH_USE_REDIS = process.env.DISPATCH_USE_REDIS !== "false";
+const DISPATCH_WS_PATH = process.env.DISPATCH_WS_PATH || "/dispatch/ws";
+const DISPATCH_GEO_VOLUNTEERS_KEY = process.env.DISPATCH_GEO_VOLUNTEERS_KEY || "dispatch:geo:volunteers";
+const DISPATCH_GEO_TASKS_KEY = process.env.DISPATCH_GEO_TASKS_KEY || "dispatch:geo:tasks";
+const DISPATCH_VOLUNTEER_HASH_KEY = process.env.DISPATCH_VOLUNTEER_HASH_KEY || "dispatch:volunteers";
+const DISPATCH_TASK_HASH_KEY = process.env.DISPATCH_TASK_HASH_KEY || "dispatch:tasks";
+const DISPATCH_SELF_ASSIGN_LIMIT = Number(process.env.DISPATCH_SELF_ASSIGN_LIMIT || 20);
 const HELPHIVE_LOGIN_DOMAIN = "@helphive.org";
 const LEGACY_LOGIN_DOMAIN = "@kindredpune.org";
 const ROLE_PAGE_FILES = [
@@ -320,6 +331,9 @@ const twilioClient =
   process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN
     ? twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN)
     : null;
+
+let redisClient = null;
+let redisReady = false;
 
 const sequelizeOptions = {
   dialect: "postgres",
@@ -836,6 +850,199 @@ const spatialIndex = {
 
 const volunteerNotificationStreams = new Map();
 const volunteerNotificationBacklog = new Map();
+const volunteerSocketStreams = new Map();
+const volunteerDispatchModes = new Map();
+const dispatchWorkQueue = [];
+let dispatchWorkScheduled = false;
+let dispatchWorkRunning = false;
+
+function isRedisUsable() {
+  return Boolean(redisClient && redisReady);
+}
+
+async function connectRedis() {
+  if (!DISPATCH_USE_REDIS || !REDIS_URL) {
+    return false;
+  }
+
+  redisClient = createClient({ url: REDIS_URL });
+  redisClient.on("error", (error) => {
+    if (redisReady) {
+      console.warn(`Redis dispatch index unavailable, using database fallback: ${error.message}`);
+    }
+    redisReady = false;
+  });
+  redisClient.on("ready", () => {
+    redisReady = true;
+  });
+  redisClient.on("end", () => {
+    redisReady = false;
+  });
+
+  try {
+    await redisClient.connect();
+    redisReady = true;
+    console.log(`Redis dispatch index ready: ${REDIS_URL}`);
+    return true;
+  } catch (error) {
+    redisReady = false;
+    redisClient = null;
+    console.warn(`Redis dispatch index unavailable, using database fallback: ${error.message}`);
+    return false;
+  }
+}
+
+async function runRedisCommand(command) {
+  if (!isRedisUsable()) {
+    return null;
+  }
+
+  try {
+    return await redisClient.sendCommand(command.map((value) => String(value)));
+  } catch (error) {
+    redisReady = false;
+    console.warn(`Redis command failed, using database fallback: ${error.message}`);
+    return null;
+  }
+}
+
+async function geoAddToRedis(key, id, coords) {
+  if (!Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) {
+    return false;
+  }
+  const result = await runRedisCommand(["GEOADD", key, coords.lng, coords.lat, id]);
+  return result !== null;
+}
+
+async function geoRemoveFromRedis(key, id) {
+  await runRedisCommand(["ZREM", key, id]);
+}
+
+async function queryRedisGeoRadius(key, coords, radiusMeters, count = 50) {
+  if (!Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) {
+    return null;
+  }
+
+  const result = await runRedisCommand([
+    "GEORADIUS",
+    key,
+    coords.lng,
+    coords.lat,
+    radiusMeters,
+    "m",
+    "WITHDIST",
+    "COUNT",
+    count,
+    "ASC"
+  ]);
+
+  if (!Array.isArray(result)) {
+    return null;
+  }
+
+  return result
+    .map((entry) => {
+      if (Array.isArray(entry)) {
+        return { id: String(entry[0]), distanceMeters: Number(entry[1]) };
+      }
+      return { id: String(entry), distanceMeters: null };
+    })
+    .filter((entry) => entry.id);
+}
+
+async function indexVolunteerInRedis(volunteer, options = {}) {
+  if (!volunteer?.id || !isRedisUsable()) {
+    return;
+  }
+
+  const coords = options.coords || pointToCoordinates(volunteer.location);
+  const isAvailable = options.isAvailable ?? volunteer.isAvailable;
+  const payload = {
+    id: volunteer.id,
+    userId: volunteer.userId,
+    isAvailable,
+    skills: volunteer.skills || [],
+    technicalSkills: volunteer.technicalSkills || [],
+    languages: volunteer.languages || [],
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    await redisClient.hSet(DISPATCH_VOLUNTEER_HASH_KEY, String(volunteer.id), JSON.stringify(payload));
+  } catch (error) {
+    redisReady = false;
+    console.warn(`Redis volunteer hash update failed: ${error.message}`);
+    return;
+  }
+  if (isAvailable) {
+    await geoAddToRedis(DISPATCH_GEO_VOLUNTEERS_KEY, volunteer.id, coords);
+  } else {
+    await geoRemoveFromRedis(DISPATCH_GEO_VOLUNTEERS_KEY, volunteer.id);
+  }
+}
+
+async function indexTaskInRedis(task, options = {}) {
+  if (!task?.id || !isRedisUsable()) {
+    return;
+  }
+
+  const coords = options.coords || pointToCoordinates(task.location);
+  const isDispatchable =
+    options.active ?? (task.status === TASK_STATUS.OPEN && !task.isAssigned && !task.completedAt);
+  const payload = {
+    id: task.id,
+    type: task.type,
+    severity: task.severity,
+    requiredSkills: task.requiredSkills || [],
+    preferredLanguages: task.preferredLanguages || [],
+    isDispatchable,
+    updatedAt: new Date().toISOString()
+  };
+
+  try {
+    await redisClient.hSet(DISPATCH_TASK_HASH_KEY, String(task.id), JSON.stringify(payload));
+  } catch (error) {
+    redisReady = false;
+    console.warn(`Redis task hash update failed: ${error.message}`);
+    return;
+  }
+  if (isDispatchable) {
+    await geoAddToRedis(DISPATCH_GEO_TASKS_KEY, task.id, coords);
+  } else {
+    await geoRemoveFromRedis(DISPATCH_GEO_TASKS_KEY, task.id);
+  }
+}
+
+async function rebuildRedisDispatchIndex() {
+  if (!isRedisUsable()) {
+    return;
+  }
+
+  try {
+    await Promise.all([
+      redisClient.del(DISPATCH_GEO_VOLUNTEERS_KEY),
+      redisClient.del(DISPATCH_GEO_TASKS_KEY),
+      redisClient.del(DISPATCH_VOLUNTEER_HASH_KEY),
+      redisClient.del(DISPATCH_TASK_HASH_KEY)
+    ]);
+  } catch (error) {
+    redisReady = false;
+    console.warn(`Redis dispatch index rebuild failed: ${error.message}`);
+    return;
+  }
+
+  const [volunteers, tasks] = await Promise.all([
+    Volunteer.findAll({ where: { isAvailable: true } }),
+    Task.findAll({ where: buildLiveTaskWhere({ isAssigned: false }) })
+  ]);
+
+  for (const volunteer of volunteers) {
+    await indexVolunteerInRedis(volunteer);
+  }
+  for (const task of tasks) {
+    await indexTaskInRedis(task);
+  }
+}
 
 function assertValidCoordinates(latitude, longitude, label = "location") {
   const lat = Number(latitude);
@@ -1083,6 +1290,21 @@ async function findAvailableVolunteersNear(location, radiusMeters = DISPATCH_DEF
   const coords = assertValidCoordinates(location.lat, location.lng);
   const excluded = new Set(excludeVolunteerIds.map(String));
 
+  const redisMatches = await queryRedisGeoRadius(DISPATCH_GEO_VOLUNTEERS_KEY, coords, radiusMeters, 50);
+  if (redisMatches) {
+    const ids = redisMatches.map((row) => row.id).filter((id) => !excluded.has(String(id)));
+    if (!ids.length) {
+      return [];
+    }
+
+    const volunteers = await Volunteer.findAll({
+      where: { id: { [Op.in]: ids }, isAvailable: true },
+      include: [{ model: User, as: "user", where: { role: "volunteer" } }]
+    });
+    const byId = new Map(volunteers.map((volunteer) => [String(volunteer.id), volunteer]));
+    return ids.map((id) => byId.get(String(id))).filter(Boolean);
+  }
+
   if (!USE_POSTGIS) {
     const volunteers = await Volunteer.findAll({
       where: { isAvailable: true },
@@ -1127,6 +1349,64 @@ async function findAvailableVolunteersNear(location, radiusMeters = DISPATCH_DEF
   });
 }
 
+async function findOpenTasksNear(location, radiusMeters = DISPATCH_DEFAULT_RADIUS_METERS) {
+  const coords = assertValidCoordinates(location.lat, location.lng);
+  const redisMatches = await queryRedisGeoRadius(DISPATCH_GEO_TASKS_KEY, coords, radiusMeters, 100);
+
+  if (redisMatches) {
+    const ids = redisMatches.map((row) => row.id);
+    if (!ids.length) {
+      return [];
+    }
+    const tasks = await Task.findAll({
+      where: {
+        id: { [Op.in]: ids },
+        ...buildLiveTaskWhere({ isAssigned: false })
+      },
+      include: [{ model: User, as: "ngo" }]
+    });
+    const byId = new Map(tasks.map((task) => [String(task.id), task]));
+    return ids.map((id) => byId.get(String(id))).filter(Boolean);
+  }
+
+  if (USE_POSTGIS) {
+    const [rows] = await sequelize.query(
+      `
+        SELECT id
+        FROM tasks
+        WHERE status = $1
+          AND completed_at IS NULL
+          AND is_assigned = FALSE
+          AND location IS NOT NULL
+          AND ST_DWithin(
+            location,
+            ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
+            $4
+          )
+        ORDER BY location <-> ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography
+        LIMIT 100
+      `,
+      { bind: [TASK_STATUS.OPEN, coords.lng, coords.lat, radiusMeters] }
+    );
+    return rows.length
+      ? Task.findAll({
+          where: { id: { [Op.in]: rows.map((row) => row.id) } },
+          include: [{ model: User, as: "ngo" }]
+        })
+      : [];
+  }
+
+  const tasks = await Task.findAll({
+    where: buildLiveTaskWhere({ isAssigned: false }),
+    include: [{ model: User, as: "ngo" }]
+  });
+  return tasks.filter((task) => {
+    const taskCoords = pointToCoordinates(task.location);
+    const distanceKm = haversineKm(coords.lat, coords.lng, taskCoords.lat, taskCoords.lng);
+    return distanceKm !== null && distanceKm * 1000 <= radiusMeters;
+  });
+}
+
 async function rankCandidatesForTask(task, options = {}) {
   const taskCoords = pointToCoordinates(task.location);
   const radiusMeters = Number(options.radiusMeters || DISPATCH_DEFAULT_RADIUS_METERS);
@@ -1139,6 +1419,31 @@ async function rankCandidatesForTask(task, options = {}) {
     const route = await computeRouteEstimate(taskCoords, volunteerCoords);
     const details = dispatchScore({ task, volunteer, route });
     ranked.push({ volunteer, ...details });
+  }
+
+  return ranked.sort((left, right) => right.score - left.score);
+}
+
+async function rankTasksForVolunteer(volunteer, options = {}) {
+  const volunteerCoords = pointToCoordinates(volunteer.location);
+  const radiusMeters = Number(options.radiusMeters || DISPATCH_DEFAULT_RADIUS_METERS);
+  const tasks = await findOpenTasksNear(volunteerCoords, radiusMeters);
+  const ranked = [];
+
+  for (const task of tasks) {
+    const skillMatchLevel = scoreSkillMatch(task.requiredSkills, volunteer);
+    const languageMatchLevel = scoreLanguageMatch(
+      normalizeArray(task.preferredLanguages).length ? task.preferredLanguages : preferredLanguagesForTask(task),
+      volunteer
+    );
+    if (options.requireFilter !== false && skillMatchLevel <= 0 && languageMatchLevel <= 0) {
+      continue;
+    }
+
+    const taskCoords = pointToCoordinates(task.location);
+    const route = await computeRouteEstimate(taskCoords, volunteerCoords);
+    const details = dispatchScore({ task, volunteer, route });
+    ranked.push({ task, ...details });
   }
 
   return ranked.sort((left, right) => right.score - left.score);
@@ -1160,7 +1465,259 @@ function sendVolunteerNotification(volunteerId, payload) {
     response.write(`data: ${JSON.stringify(event)}\n\n`);
   }
 
+  sendVolunteerSocketMessage(id, "dispatch", event);
   return event;
+}
+
+function sendVolunteerSocketMessage(volunteerId, type, payload = {}) {
+  const sockets = volunteerSocketStreams.get(String(volunteerId));
+  if (!sockets?.size) {
+    return 0;
+  }
+
+  const message = JSON.stringify({
+    type,
+    createdAt: new Date().toISOString(),
+    ...payload
+  });
+  let sent = 0;
+  for (const socket of sockets) {
+    if (socket.readyState === 1) {
+      socket.send(message);
+      sent += 1;
+    }
+  }
+  return sent;
+}
+
+function normalizeDispatchMode(value = "") {
+  const candidate = String(value || "").trim().toLowerCase();
+  if (["self_assign", "self-assign", "volunteer_choice", "manual"].includes(candidate)) {
+    return "self_assign";
+  }
+  return "auto_assign";
+}
+
+function parseBooleanLike(value, fallback = false) {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (["true", "1", "yes", "available"].includes(normalized)) {
+    return true;
+  }
+  if (["false", "0", "no", "busy", "offline"].includes(normalized)) {
+    return false;
+  }
+  return fallback;
+}
+
+function enqueueDispatchWork(work) {
+  dispatchWorkQueue.push({
+    id: createId("dispatch_work"),
+    createdAt: new Date().toISOString(),
+    ...work
+  });
+
+  if (!dispatchWorkScheduled) {
+    dispatchWorkScheduled = true;
+    setImmediate(processDispatchWorkQueue);
+  }
+}
+
+async function sendSelfAssignTaskList(volunteer, options = {}) {
+  const ranked = await rankTasksForVolunteer(volunteer, {
+    radiusMeters: options.radiusMeters,
+    requireFilter: true
+  });
+  const entries = ranked.slice(0, DISPATCH_SELF_ASSIGN_LIMIT);
+
+  sendVolunteerNotification(volunteer.id, {
+    type: "task_list_update",
+    mode: "self_assign",
+    tasks: await Promise.all(
+      entries.map(async (entry) => ({
+        ...(await buildTaskPayload(entry.task, { role: "volunteer", volunteerProfile: volunteer })),
+        match: {
+          score: Number(entry.score.toFixed(3)),
+          skillMatchLevel: Number(entry.skillMatchLevel.toFixed(3)),
+          languageMatchLevel: Number(entry.languageMatchLevel.toFixed(3)),
+          reliabilityScore: Number(entry.reliabilityScore.toFixed(3)),
+          routeTimeSeconds:
+            entry.routeTimeSeconds === null ? null : Math.round(entry.routeTimeSeconds),
+          routeDistanceMeters:
+            entry.routeDistanceMeters === null ? null : Math.round(entry.routeDistanceMeters),
+          routeProvider: entry.routeProvider
+        }
+      }))
+    )
+  });
+
+  return entries;
+}
+
+async function autoAssignBestTaskForVolunteer(volunteer, options = {}) {
+  const ranked = await rankTasksForVolunteer(volunteer, {
+    radiusMeters: options.radiusMeters,
+    requireFilter: true
+  });
+  const best = ranked[0];
+  if (!best) {
+    sendVolunteerNotification(volunteer.id, {
+      type: "dispatch_idle",
+      reason: "No nearby matching open tasks were found."
+    });
+    return { assigned: false, reason: "No nearby matching open tasks were found." };
+  }
+
+  const result = await assignTaskToVolunteer({
+    task: best.task,
+    rankedCandidate: { volunteer, ...best },
+    mode: "auto_assign"
+  });
+  await indexVolunteerInRedis(volunteer, { isAvailable: false });
+  await indexTaskInRedis(best.task, { active: false });
+
+  return {
+    assigned: true,
+    taskId: best.task.id,
+    volunteerId: volunteer.id,
+    assignmentId: result.assignment.id,
+    score: Number(best.score.toFixed(3))
+  };
+}
+
+async function recordDispatchOutcome({
+  task,
+  volunteer = null,
+  assignment = null,
+  outcome,
+  notes = "",
+  correction = {}
+}) {
+  const normalizedOutcome = String(outcome || "").trim().toLowerCase();
+  const allowed = new Set(["completed", "cancelled", "canceled", "false", "declined", "accepted"]);
+  if (!allowed.has(normalizedOutcome)) {
+    const error = new Error("Dispatch outcome must be completed, cancelled, false, declined, or accepted.");
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const storedOutcome = normalizedOutcome === "canceled" ? "cancelled" : normalizedOutcome;
+  const outcomeRecord = await DispatchOutcome.create({
+    id: createId("dispatch_outcome"),
+    taskId: task.id,
+    volunteerId: volunteer?.id || assignment?.volunteerId || null,
+    assignmentId: assignment?.id || null,
+    outcome: storedOutcome,
+    notes: String(notes || "").trim(),
+    correction: correction && typeof correction === "object" ? correction : {}
+  });
+
+  if (storedOutcome === "completed" && volunteer?.userId) {
+    await sequelize.query(
+      `
+        UPDATE users
+        SET reports_total = reports_total + 1,
+            reports_confirmed = reports_confirmed + 1,
+            trust_score = (reports_confirmed + 2)::float / (reports_total + 3)
+        WHERE id = $1
+      `,
+      { bind: [volunteer.userId] }
+    );
+  }
+
+  if (storedOutcome === "false" && task.ngoId) {
+    await sequelize.query(
+      `
+        UPDATE users
+        SET reports_total = reports_total + 1,
+            trust_score = (reports_confirmed + 1)::float / (reports_total + 3)
+        WHERE id = $1
+      `,
+      { bind: [task.ngoId] }
+    );
+  }
+
+  return outcomeRecord;
+}
+
+async function processDispatchWorkQueue() {
+  dispatchWorkScheduled = false;
+  if (dispatchWorkRunning) {
+    return;
+  }
+
+  dispatchWorkRunning = true;
+  try {
+    while (dispatchWorkQueue.length) {
+      const work = dispatchWorkQueue.shift();
+      try {
+        if (work.kind === "new_task") {
+          const task = await Task.findByPk(work.taskId);
+          if (!task || task.status !== TASK_STATUS.OPEN || task.isAssigned || task.completedAt) {
+            continue;
+          }
+
+          await indexTaskInRedis(task);
+          const taskCoords = pointToCoordinates(task.location);
+          const rankedVolunteers = await rankCandidatesForTask(task, {
+            radiusMeters: work.radiusMeters
+          });
+          const selfAssignVolunteers = [];
+          for (const candidate of rankedVolunteers) {
+            const mode =
+              work.mode === "self_assign"
+                ? "self_assign"
+                : volunteerDispatchModes.get(String(candidate.volunteer.id)) || "auto_assign";
+
+            if (mode === "self_assign") {
+              selfAssignVolunteers.push(candidate.volunteer);
+              continue;
+            }
+
+            await assignTaskToVolunteer({
+              task,
+              rankedCandidate: candidate,
+              mode: "auto_assign"
+            });
+            await indexTaskInRedis(task, { coords: taskCoords, active: false });
+            break;
+          }
+
+          for (const volunteer of selfAssignVolunteers) {
+            await sendSelfAssignTaskList(volunteer, { radiusMeters: work.radiusMeters });
+          }
+          continue;
+        }
+
+        if (work.kind === "volunteer_available") {
+          const volunteer = await Volunteer.findByPk(work.volunteerId, {
+            include: [{ model: User, as: "user", where: { role: "volunteer" } }]
+          });
+          if (!volunteer || !volunteer.isAvailable) {
+            continue;
+          }
+
+          await indexVolunteerInRedis(volunteer);
+          const mode = normalizeDispatchMode(work.mode || volunteerDispatchModes.get(String(volunteer.id)));
+          if (mode === "self_assign") {
+            await sendSelfAssignTaskList(volunteer, { radiusMeters: work.radiusMeters });
+          } else {
+            await autoAssignBestTaskForVolunteer(volunteer, { radiusMeters: work.radiusMeters });
+          }
+        }
+      } catch (error) {
+        console.warn(`Dispatch work item failed: ${error.message}`);
+      }
+    }
+  } finally {
+    dispatchWorkRunning = false;
+    if (dispatchWorkQueue.length && !dispatchWorkScheduled) {
+      dispatchWorkScheduled = true;
+      setImmediate(processDispatchWorkQueue);
+    }
+  }
 }
 
 async function assignTaskToVolunteer({ task, rankedCandidate, mode = "auto_assign", transaction = null }) {
@@ -1196,10 +1753,24 @@ async function assignTaskToVolunteer({ task, rankedCandidate, mode = "auto_assig
     { transaction }
   );
 
-  await volunteer.update({ isAvailable: mode === "volunteer_choice" ? false : volunteer.isAvailable }, { transaction });
+  await volunteer.update({ isAvailable: false }, { transaction });
 
   const taskCoords = pointToCoordinates(task.location);
   setSpatialMembership({ kind: "task", id: task.id, latitude: taskCoords.lat, longitude: taskCoords.lng, active: false });
+  const volunteerCoords = pointToCoordinates(volunteer.location);
+  if (Number.isFinite(volunteerCoords.lat) && Number.isFinite(volunteerCoords.lng)) {
+    setSpatialMembership({
+      kind: "volunteer",
+      id: volunteer.id,
+      latitude: volunteerCoords.lat,
+      longitude: volunteerCoords.lng,
+      active: false
+    });
+  }
+  await Promise.all([
+    indexTaskInRedis(task, { coords: taskCoords, active: false }),
+    indexVolunteerInRedis(volunteer, { coords: volunteerCoords, isAvailable: false })
+  ]);
 
   const notification = sendVolunteerNotification(volunteer.id, {
     type: "task_assigned",
@@ -2296,6 +2867,49 @@ const Assignment = sequelize.define(
   }
 );
 
+const DispatchOutcome = sequelize.define(
+  "DispatchOutcome",
+  {
+    id: {
+      type: DataTypes.STRING,
+      primaryKey: true
+    },
+    taskId: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      field: "task_id"
+    },
+    volunteerId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: "volunteer_id"
+    },
+    assignmentId: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      field: "assignment_id"
+    },
+    outcome: {
+      type: DataTypes.STRING,
+      allowNull: false
+    },
+    notes: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    },
+    correction: {
+      type: DataTypes.JSONB,
+      allowNull: false,
+      defaultValue: {}
+    }
+  },
+  {
+    tableName: "dispatch_outcomes",
+    createdAt: "created_at",
+    updatedAt: false
+  }
+);
+
 const Contribution = sequelize.define(
   "Contribution",
   {
@@ -2524,6 +3138,15 @@ Task.hasMany(Assignment, { foreignKey: "task_id", as: "assignments" });
 Assignment.belongsTo(Volunteer, { foreignKey: "volunteer_id", as: "volunteer" });
 Volunteer.hasMany(Assignment, { foreignKey: "volunteer_id", as: "assignments" });
 
+DispatchOutcome.belongsTo(Task, { foreignKey: "task_id", as: "task" });
+Task.hasMany(DispatchOutcome, { foreignKey: "task_id", as: "dispatchOutcomes" });
+
+DispatchOutcome.belongsTo(Volunteer, { foreignKey: "volunteer_id", as: "volunteer" });
+Volunteer.hasMany(DispatchOutcome, { foreignKey: "volunteer_id", as: "dispatchOutcomes" });
+
+DispatchOutcome.belongsTo(Assignment, { foreignKey: "assignment_id", as: "assignment" });
+Assignment.hasMany(DispatchOutcome, { foreignKey: "assignment_id", as: "outcomes" });
+
 Contribution.belongsTo(Company, { foreignKey: "company_id", as: "company" });
 Company.hasMany(Contribution, { foreignKey: "company_id", as: "contributions" });
 
@@ -2614,6 +3237,26 @@ async function ensureDatabase() {
   await sequelize.query(
     `ALTER TABLE tasks ADD COLUMN IF NOT EXISTS status VARCHAR(32) NOT NULL DEFAULT '${TASK_STATUS.OPEN}';`
   );
+  await sequelize.query(`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'tasks_status_check'
+          AND conrelid = 'tasks'::regclass
+      ) THEN
+        ALTER TABLE tasks DROP CONSTRAINT tasks_status_check;
+      END IF;
+    END $$;
+  `);
+  await sequelize.query(
+    "ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('open', 'in_progress', 'completed', 'resolved', 'pending_review', 'pending', 'confirmed', 'rejected', 'auto_accepted')) NOT VALID;"
+  ).catch((error) => {
+    if (!/already exists/i.test(error.message)) {
+      throw error;
+    }
+  });
   await sequelize.query(
     "ALTER TABLE tasks ADD COLUMN IF NOT EXISTS rejected_at TIMESTAMP WITH TIME ZONE;"
   );
@@ -4809,6 +5452,310 @@ async function requireAuth(request, response, next) {
   next();
 }
 
+function parseWebSocketToken(requestUrl = "", headers = {}) {
+  const authHeader = headers.authorization || "";
+  if (authHeader.startsWith("Bearer ")) {
+    return authHeader.slice(7);
+  }
+
+  try {
+    const parsed = new URL(requestUrl, "http://localhost");
+    return parsed.searchParams.get("token") || "";
+  } catch (error) {
+    return "";
+  }
+}
+
+async function authenticateWebSocket(request) {
+  const token = parseWebSocketToken(request.url, request.headers);
+  if (!token) {
+    return null;
+  }
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (!payload?.sub) {
+      return null;
+    }
+    return getUserWithProfile(payload.sub);
+  } catch (error) {
+    return null;
+  }
+}
+
+function sendSocketJson(socket, payload) {
+  if (socket.readyState === 1) {
+    socket.send(JSON.stringify({ createdAt: new Date().toISOString(), ...payload }));
+  }
+}
+
+async function updateVolunteerLocationStatus(volunteer, body = {}) {
+  const hasCoordinates =
+    body.location ||
+    body.latitude !== undefined ||
+    body.lat !== undefined ||
+    body.gps_lat !== undefined ||
+    body.longitude !== undefined ||
+    body.lng !== undefined ||
+    body.gps_lng !== undefined;
+  const existingCoords = pointToCoordinates(volunteer.location);
+  const coords = hasCoordinates
+    ? readLatLngFromBody(body)
+    : assertValidCoordinates(existingCoords.lat, existingCoords.lng, "volunteer.location");
+  const requestedStatus = String(body.status || "").trim().toLowerCase();
+  const isAvailable =
+    requestedStatus === "busy" || requestedStatus === "offline"
+      ? false
+      : requestedStatus === "available"
+        ? true
+        : body.isAvailable === undefined
+          ? volunteer.isAvailable
+          : parseBooleanLike(body.isAvailable, volunteer.isAvailable);
+  const dispatchMode = normalizeDispatchMode(body.dispatchMode || body.assignmentMode || body.mode);
+
+  await volunteer.update({
+    location: pointFromCoordinates(coords.lat, coords.lng),
+    isAvailable
+  });
+  volunteerDispatchModes.set(String(volunteer.id), dispatchMode);
+
+  const cell = setSpatialMembership({
+    kind: "volunteer",
+    id: volunteer.id,
+    latitude: coords.lat,
+    longitude: coords.lng,
+    active: isAvailable
+  });
+  await indexVolunteerInRedis(volunteer, { coords, isAvailable });
+
+  if (isAvailable) {
+    enqueueDispatchWork({
+      kind: "volunteer_available",
+      volunteerId: volunteer.id,
+      mode: dispatchMode,
+      radiusMeters: body.radiusMeters || body.radius_meters
+    });
+  }
+
+  return {
+    volunteer: {
+      id: volunteer.id,
+      userId: volunteer.userId,
+      status: isAvailable ? "available" : "busy",
+      dispatchMode,
+      location: coords
+    },
+    spatial: { grid: "h3", cell, resolution: DISPATCH_H3_RESOLUTION }
+  };
+}
+
+async function handleDispatchSocketMessage({ socket, user, volunteer, rawMessage }) {
+  let message;
+  try {
+    message = JSON.parse(String(rawMessage || "{}"));
+  } catch (error) {
+    sendSocketJson(socket, { type: "error", error: "WebSocket messages must be JSON." });
+    return;
+  }
+
+  const type = String(message.type || "").trim();
+  try {
+    if (type === "volunteer_location_update" || type === "status_update") {
+      if (!volunteer) {
+        sendSocketJson(socket, { type: "error", error: "Volunteer profile required." });
+        return;
+      }
+      const result = await updateVolunteerLocationStatus(volunteer, message);
+      sendSocketJson(socket, { type: "volunteer_status_updated", ...result });
+      return;
+    }
+
+    if (type === "task_ingest") {
+      if (!["ngo", "admin"].includes(user.role)) {
+        sendSocketJson(socket, { type: "error", error: "Only NGO workers or admins can ingest dispatch tasks." });
+        return;
+      }
+      const { task, cell } = await createDispatchTaskFromRequest(message.task || message, user);
+      await indexTaskInRedis(task);
+      enqueueDispatchWork({
+        kind: "new_task",
+        taskId: task.id,
+        mode: normalizeDispatchMode(message.assignmentMode || message.mode),
+        radiusMeters: message.radiusMeters || message.radius_meters
+      });
+      sendSocketJson(socket, {
+        type: "task_ingested",
+        task: await buildTaskPayload(task, user),
+        spatial: { grid: "h3", cell, resolution: DISPATCH_H3_RESOLUTION }
+      });
+      return;
+    }
+
+    if (type === "accept_task") {
+      if (!volunteer) {
+        sendSocketJson(socket, { type: "error", error: "Volunteer profile required." });
+        return;
+      }
+      const task = await Task.findByPk(message.taskId || message.task_id);
+      if (!task) {
+        sendSocketJson(socket, { type: "error", error: "Task not found." });
+        return;
+      }
+      let assignment = await Assignment.findOne({ where: { taskId: task.id, volunteerId: volunteer.id } });
+      if (!assignment) {
+        const taskCoords = pointToCoordinates(task.location);
+        const volunteerCoords = pointToCoordinates(volunteer.location);
+        const route = await computeRouteEstimate(taskCoords, volunteerCoords);
+        const score = dispatchScore({ task, volunteer, route });
+        assignment = (await assignTaskToVolunteer({
+          task,
+          rankedCandidate: { volunteer, ...score },
+          mode: "volunteer_choice"
+        })).assignment;
+      } else {
+        await Promise.all([
+          assignment.update({ status: "active", assignedAt: new Date() }),
+          task.update({ isAssigned: true, status: TASK_STATUS.OPEN, updatedAt: new Date() }),
+          volunteer.update({ isAvailable: false })
+        ]);
+      }
+      await recordDispatchOutcome({ task, volunteer, assignment, outcome: "accepted" });
+      await Promise.all([
+        indexTaskInRedis(task, { active: false }),
+        indexVolunteerInRedis(volunteer, { isAvailable: false })
+      ]);
+      sendSocketJson(socket, { type: "task_acceptance_recorded", taskId: task.id, assignmentId: assignment.id });
+      return;
+    }
+
+    if (type === "decline_task") {
+      if (!volunteer) {
+        sendSocketJson(socket, { type: "error", error: "Volunteer profile required." });
+        return;
+      }
+      const task = await Task.findByPk(message.taskId || message.task_id);
+      if (!task) {
+        sendSocketJson(socket, { type: "error", error: "Task not found." });
+        return;
+      }
+      const assignment = await Assignment.findOne({ where: { taskId: task.id, volunteerId: volunteer.id } });
+      if (assignment) {
+        await assignment.update({ status: "declined" });
+      }
+      await volunteer.update({ isAvailable: true });
+      await recordDispatchOutcome({ task, volunteer, assignment, outcome: "declined", notes: message.notes });
+      await indexVolunteerInRedis(volunteer, { isAvailable: true });
+      enqueueDispatchWork({
+        kind: "new_task",
+        taskId: task.id,
+        radiusMeters: message.radiusMeters || message.radius_meters
+      });
+      sendSocketJson(socket, { type: "task_decline_recorded", taskId: task.id });
+      return;
+    }
+
+    if (type === "dispatch_outcome") {
+      const task = await Task.findByPk(message.taskId || message.task_id);
+      if (!task) {
+        sendSocketJson(socket, { type: "error", error: "Task not found." });
+        return;
+      }
+      const assignment = message.assignmentId
+        ? await Assignment.findByPk(message.assignmentId)
+        : volunteer
+          ? await Assignment.findOne({ where: { taskId: task.id, volunteerId: volunteer.id } })
+          : null;
+      const outcomeRecord = await recordDispatchOutcome({
+        task,
+        volunteer,
+        assignment,
+        outcome: message.outcome,
+        notes: message.notes,
+        correction: message.correction
+      });
+      sendSocketJson(socket, { type: "dispatch_outcome_recorded", outcomeId: outcomeRecord.id });
+      return;
+    }
+
+    sendSocketJson(socket, { type: "error", error: "Unknown dispatch WebSocket message type." });
+  } catch (error) {
+    sendSocketJson(socket, { type: "error", error: error.message || "Dispatch WebSocket action failed." });
+  }
+}
+
+async function attachDispatchWebSocketServer(httpServer) {
+  const webSocketServer = new WebSocketServer({ noServer: true });
+
+  httpServer.on("upgrade", async (request, socket, head) => {
+    let pathname = "";
+    try {
+      pathname = new URL(request.url, "http://localhost").pathname;
+    } catch (error) {
+      socket.destroy();
+      return;
+    }
+
+    if (pathname !== DISPATCH_WS_PATH) {
+      return;
+    }
+
+    const user = await authenticateWebSocket(request);
+    if (!user) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
+    webSocketServer.handleUpgrade(request, socket, head, async (ws) => {
+      const volunteer =
+        user.role === "volunteer" ? await ensureVolunteerProfileForUser(user.id) : user.volunteerProfile || null;
+      webSocketServer.emit("connection", ws, request, user, volunteer);
+    });
+  });
+
+  webSocketServer.on("connection", (socket, request, user, volunteer) => {
+    if (volunteer) {
+      const streams = volunteerSocketStreams.get(String(volunteer.id)) || new Set();
+      streams.add(socket);
+      volunteerSocketStreams.set(String(volunteer.id), streams);
+    }
+
+    sendSocketJson(socket, {
+      type: "ready",
+      userId: user.id,
+      role: user.role,
+      volunteerId: volunteer?.id || null,
+      protocol: {
+        location: "volunteer_location_update",
+        taskIngest: "task_ingest",
+        accept: "accept_task",
+        decline: "decline_task",
+        outcome: "dispatch_outcome"
+      }
+    });
+
+    socket.on("message", (rawMessage) => {
+      handleDispatchSocketMessage({ socket, user, volunteer, rawMessage });
+    });
+
+    socket.on("close", () => {
+      if (!volunteer) {
+        return;
+      }
+      const streams = volunteerSocketStreams.get(String(volunteer.id));
+      if (!streams) {
+        return;
+      }
+      streams.delete(socket);
+      if (!streams.size) {
+        volunteerSocketStreams.delete(String(volunteer.id));
+      }
+    });
+  });
+
+  return webSocketServer;
+}
+
 function requireRole(roles) {
   return (request, response, next) => {
     if (!request.user) {
@@ -5255,6 +6202,7 @@ app.post(["/api/tasks", "/tasks"], requireAuth, async (request, response, next) 
           active: task.status === TASK_STATUS.OPEN && !task.isAssigned
         });
       }
+      await indexTaskInRedis(task);
       const dispatch =
         task.status === TASK_STATUS.OPEN && !task.isAssigned
           ? await dispatchTask(task, { mode: "auto_assign" })
@@ -5270,6 +6218,7 @@ app.post(["/api/tasks", "/tasks"], requireAuth, async (request, response, next) 
         : "auto_assign",
       radiusMeters: request.body.radiusMeters || request.body.radius_meters
     });
+    await indexTaskInRedis(task, { active: !dispatch?.assigned });
     response.status(201).json({
       task: await buildTaskPayload(task, request.user),
       dispatch,
@@ -5500,7 +6449,6 @@ app.post(
   requireRole(["volunteer", "admin"]),
   async (request, response, next) => {
     try {
-      const coords = readLatLngFromBody(request.body);
       const volunteer = await Volunteer.findOne({
         include: [{ model: User, as: "user" }],
         where: {
@@ -5518,31 +6466,10 @@ app.post(
         return;
       }
 
-      const requestedStatus = String(request.body.status || "").trim().toLowerCase();
-      const isAvailable =
-        requestedStatus === "busy"
-          ? false
-          : requestedStatus === "available"
-            ? true
-            : request.body.isAvailable === undefined
-              ? volunteer.isAvailable
-              : Boolean(request.body.isAvailable);
-
-      await volunteer.update({
-        location: pointFromCoordinates(coords.lat, coords.lng),
-        isAvailable
-      });
-
-      const cell = setSpatialMembership({
-        kind: "volunteer",
-        id: volunteer.id,
-        latitude: coords.lat,
-        longitude: coords.lng,
-        active: isAvailable
-      });
+      const result = await updateVolunteerLocationStatus(volunteer, request.body);
 
       let rematch = null;
-      if (isAvailable && request.body.autoDispatch === true) {
+      if (result.volunteer.status === "available" && request.body.autoDispatch === true) {
         const nearbyTasks = await Task.findAll({
           where: buildLiveTaskWhere({ isAssigned: false }),
           limit: 5,
@@ -5551,6 +6478,7 @@ app.post(
         const dispatched = [];
         for (const task of nearbyTasks) {
           const taskCoords = pointToCoordinates(task.location);
+          const coords = result.volunteer.location;
           const distanceKm = haversineKm(coords.lat, coords.lng, taskCoords.lat, taskCoords.lng);
           if (distanceKm !== null && distanceKm * 1000 <= DISPATCH_DEFAULT_RADIUS_METERS) {
             dispatched.push({ taskId: task.id, result: await dispatchTask(task) });
@@ -5560,13 +6488,7 @@ app.post(
       }
 
       response.json({
-        volunteer: {
-          id: volunteer.id,
-          userId: volunteer.userId,
-          status: isAvailable ? "available" : "busy",
-          location: coords
-        },
-        spatial: { grid: "h3", cell, resolution: DISPATCH_H3_RESOLUTION },
+        ...result,
         rematch
       });
     } catch (error) {
@@ -5596,38 +6518,7 @@ app.get(["/api/tasks/nearby", "/tasks/nearby"], requireAuth, requireRole(["volun
     assertValidCoordinates(volunteerCoords.lat, volunteerCoords.lng, "volunteer.location");
     const radiusMeters = Number(request.query.radiusMeters || request.query.radius_meters || DISPATCH_DEFAULT_RADIUS_METERS);
     const sort = String(request.query.sort || "distance").toLowerCase();
-    let tasks;
-
-    if (USE_POSTGIS) {
-      const [rows] = await sequelize.query(
-        `
-          SELECT id
-          FROM tasks
-          WHERE status = $1
-            AND completed_at IS NULL
-            AND is_assigned = FALSE
-            AND location IS NOT NULL
-            AND ST_DWithin(
-              location,
-              ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
-              $4
-            )
-          ORDER BY location <-> ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography
-          LIMIT 100
-        `,
-        { bind: [TASK_STATUS.OPEN, volunteerCoords.lng, volunteerCoords.lat, radiusMeters] }
-      );
-      tasks = rows.length
-        ? await Task.findAll({ where: { id: { [Op.in]: rows.map((row) => row.id) } }, include: [{ model: User, as: "ngo" }] })
-        : [];
-    } else {
-      tasks = await Task.findAll({ where: buildLiveTaskWhere({ isAssigned: false }), include: [{ model: User, as: "ngo" }] });
-      tasks = tasks.filter((task) => {
-        const taskCoords = pointToCoordinates(task.location);
-        const distanceKm = haversineKm(volunteerCoords.lat, volunteerCoords.lng, taskCoords.lat, taskCoords.lng);
-        return distanceKm !== null && distanceKm * 1000 <= radiusMeters;
-      });
-    }
+    const tasks = await findOpenTasksNear(volunteerCoords, radiusMeters);
 
     const visibleTasks = [];
     for (const task of tasks) {
@@ -5727,6 +6618,7 @@ app.post(["/api/tasks/:id/accept", "/tasks/:id/accept"], requireAuth, requireRol
     const taskCoords = pointToCoordinates(task.location);
     setSpatialMembership({ kind: "task", id: task.id, latitude: taskCoords.lat, longitude: taskCoords.lng, active: false });
     setSpatialMembership({ kind: "volunteer", id: volunteer.id, latitude: pointToCoordinates(volunteer.location).lat, longitude: pointToCoordinates(volunteer.location).lng, active: false });
+    await recordDispatchOutcome({ task, volunteer, assignment, outcome: "accepted" });
     sendVolunteerNotification(volunteer.id, { type: "task_acceptance_recorded", taskId: task.id, assignmentId: assignment.id });
 
     response.json({
@@ -5764,6 +6656,13 @@ app.post(["/api/tasks/:id/decline", "/tasks/:id/decline"], requireAuth, requireR
     const assignment = await Assignment.findOne({ where: { taskId: task.id, volunteerId: volunteer.id } });
     if (assignment) {
       await assignment.update({ status: "declined" });
+      await recordDispatchOutcome({
+        task,
+        volunteer,
+        assignment,
+        outcome: "declined",
+        notes: request.body.notes
+      });
     }
 
     const remaining = await Assignment.count({
@@ -5903,6 +6802,58 @@ app.post("/api/tasks/:id/complete", requireAuth, async (request, response, next)
       peopleServed: task.peopleServed || inferPeopleServed(task.type, task.severity),
       updatedAt: new Date()
     });
+    await Promise.all(
+      (task.assignments || [])
+        .filter((assignment) => ["active", "pending"].includes(assignment.status))
+        .map((assignment) => assignment.update({ status: "completed" }))
+    );
+    const assignedVolunteerIdsToRelease = uniqueValues(
+      (task.assignments || []).map((assignment) => assignment.volunteerId)
+    );
+    if (assignedVolunteerIdsToRelease.length) {
+      const volunteersToRelease = await Volunteer.findAll({
+        where: { id: { [Op.in]: assignedVolunteerIdsToRelease } }
+      });
+      await Promise.all(
+        volunteersToRelease.map(async (volunteer) => {
+          await volunteer.update({ isAvailable: true });
+          await indexVolunteerInRedis(volunteer, { isAvailable: true });
+          const coords = pointToCoordinates(volunteer.location);
+          if (Number.isFinite(coords.lat) && Number.isFinite(coords.lng)) {
+            setSpatialMembership({
+              kind: "volunteer",
+              id: volunteer.id,
+              latitude: coords.lat,
+              longitude: coords.lng,
+              active: true
+            });
+          }
+        })
+      );
+    }
+    if (volunteerProfile) {
+      const assignment = (task.assignments || []).find(
+        (entry) => entry.volunteerId === volunteerProfile.id
+      );
+      await recordDispatchOutcome({
+        task,
+        volunteer: volunteerProfile,
+        assignment,
+        outcome: "completed",
+        notes: request.body.notes
+      });
+    }
+    const taskCoords = pointToCoordinates(task.location);
+    await indexTaskInRedis(task, { coords: taskCoords, active: false });
+    if (Number.isFinite(taskCoords.lat) && Number.isFinite(taskCoords.lng)) {
+      setSpatialMembership({
+        kind: "task",
+        id: task.id,
+        latitude: taskCoords.lat,
+        longitude: taskCoords.lng,
+        active: false
+      });
+    }
 
     const refreshedTask = await Task.findByPk(task.id, {
       include: [
@@ -5916,6 +6867,91 @@ app.post("/api/tasks/:id/complete", requireAuth, async (request, response, next)
     });
 
     response.json({ task: await buildTaskPayload(refreshedTask, request.user) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/dispatch/outcomes", requireAuth, async (request, response, next) => {
+  try {
+    const task = await Task.findByPk(request.body.taskId || request.body.task_id);
+    if (!task) {
+      response.status(404).json({ error: "Task not found." });
+      return;
+    }
+
+    const volunteer = request.body.volunteerId || request.body.volunteer_id
+      ? await Volunteer.findOne({
+          where: {
+            [Op.or]: [
+              { id: request.body.volunteerId || request.body.volunteer_id },
+              { userId: request.body.volunteerId || request.body.volunteer_id }
+            ]
+          }
+        })
+      : await Volunteer.findOne({ where: { userId: request.user.id } });
+    const assignment = request.body.assignmentId || request.body.assignment_id
+      ? await Assignment.findByPk(request.body.assignmentId || request.body.assignment_id)
+      : volunteer
+        ? await Assignment.findOne({ where: { taskId: task.id, volunteerId: volunteer.id } })
+        : null;
+    const isAssignedVolunteer = Boolean(volunteer && assignment && volunteer.userId === request.user.id);
+    const canRecord =
+      request.user.role === "admin" ||
+      request.user.role === "ngo" ||
+      isAssignedVolunteer;
+
+    if (!canRecord) {
+      response.status(403).json({ error: "You cannot record this dispatch outcome." });
+      return;
+    }
+
+    const outcome = String(request.body.outcome || "").trim().toLowerCase();
+    const outcomeRecord = await recordDispatchOutcome({
+      task,
+      volunteer,
+      assignment,
+      outcome,
+      notes: request.body.notes,
+      correction: request.body.correction
+    });
+
+    if (["cancelled", "canceled", "false"].includes(outcome)) {
+      await task.update({
+        status: outcome === "false" ? TASK_STATUS.REJECTED : TASK_STATUS.OPEN,
+        isAssigned: false,
+        rejectedAt: outcome === "false" ? new Date() : task.rejectedAt,
+        updatedAt: new Date()
+      });
+      if (assignment) {
+        await assignment.update({ status: "cancelled" });
+      }
+      const taskCoords = pointToCoordinates(task.location);
+      const shouldRemainDispatchable = outcome !== "false";
+      setSpatialMembership({
+        kind: "task",
+        id: task.id,
+        latitude: taskCoords.lat,
+        longitude: taskCoords.lng,
+        active: shouldRemainDispatchable
+      });
+      await indexTaskInRedis(task, { coords: taskCoords, active: shouldRemainDispatchable });
+    }
+
+    if (volunteer && ["cancelled", "canceled", "false", "completed"].includes(outcome)) {
+      await volunteer.update({ isAvailable: true });
+      await indexVolunteerInRedis(volunteer, { isAvailable: true });
+    }
+
+    response.status(201).json({
+      outcome: {
+        id: outcomeRecord.id,
+        taskId: outcomeRecord.taskId,
+        volunteerId: outcomeRecord.volunteerId,
+        assignmentId: outcomeRecord.assignmentId,
+        outcome: outcomeRecord.outcome
+      }
+    });
   } catch (error) {
     next(error);
   }
@@ -6626,14 +7662,19 @@ async function initializeApp() {
   await ensureDirectories();
   await ensureDatabase();
   await seedDatabase();
+  await connectRedis();
   await rebuildSpatialIndex();
+  await rebuildRedisDispatchIndex();
 }
 
 initializeApp()
-  .then(() => {
-    app.listen(port, "0.0.0.0", () => {
+  .then(async () => {
+    const httpServer = http.createServer(app);
+    await attachDispatchWebSocketServer(httpServer);
+    httpServer.listen(port, "0.0.0.0", () => {
       console.log(`Server is running on port ${port}`);
       console.log(`Database connection ready: ${DISPLAY_DATABASE_URL}`);
+      console.log(`Dispatch WebSocket ready at ${DISPATCH_WS_PATH}`);
     });
   })
   .catch((error) => {
