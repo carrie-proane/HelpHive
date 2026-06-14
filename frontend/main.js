@@ -24,6 +24,13 @@ const visibleTabsByRole = {
   ngo_admin: ["home", "intelligence", "admin_dashboard"],
   ngo_worker: ["home", "intelligence", "field_desk"],
   volunteer: ["home", "intelligence", "my_tasks"],
+  csr: ["home"]
+};
+
+const allowedPageNavKeysByRole = {
+  ngo_admin: ["home", "intelligence", "admin_dashboard"],
+  ngo_worker: ["home", "intelligence", "field_desk"],
+  volunteer: ["home", "intelligence", "my_tasks"],
   csr: ["home", "csr_dashboard"]
 };
 
@@ -742,9 +749,7 @@ function buildReviewImageGalleryMarkup(item = {}) {
 function buildOcrBatchSummaryMarkup(summary = {}) {
   const submittedCount = Number(summary.submittedCount || 0);
   const processedCount = Number(summary.processedCount || 0);
-  const passedCount = Number(summary.passedCount || 0);
   const flaggedCount = Number(summary.flaggedCount || 0);
-  const failedCount = Number(summary.failedCount || 0);
 
   return `
     <div class="ocr-summary-grid">
@@ -757,22 +762,9 @@ function buildOcrBatchSummaryMarkup(summary = {}) {
         <strong>${escapeHtml(processedCount)}</strong>
       </article>
       <article class="ocr-summary-card">
-        <span>Passed</span>
-        <strong>${escapeHtml(passedCount)}</strong>
-      </article>
-      <article class="ocr-summary-card">
         <span>Flagged</span>
         <strong>${escapeHtml(flaggedCount)}</strong>
       </article>
-      ${failedCount
-      ? `
-            <article class="ocr-summary-card">
-              <span>Failed</span>
-              <strong>${escapeHtml(failedCount)}</strong>
-            </article>
-          `
-      : ""
-    }
     </div>
   `;
 }
@@ -788,9 +780,22 @@ function splitTableCells(line = "") {
     .filter((cell, index, cells) => cell || (index > 0 && index < cells.length - 1));
 }
 
-function renderTextBlockMarkup(lines = []) {
+function renderTextBlockMarkup(lines = [], useParagraphs = false) {
   const text = lines.join("\n").trim();
-  return text ? `<pre>${escapeHtml(text)}</pre>` : "";
+  if (!text) {
+    return "";
+  }
+
+  if (!useParagraphs) {
+    return `<pre>${escapeHtml(text)}</pre>`;
+  }
+
+  return text
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`)
+    .join("");
 }
 
 function renderOcrTableMarkup(lines = []) {
@@ -836,13 +841,18 @@ function renderOcrTableMarkup(lines = []) {
 
 function renderOcrTextMarkup(text = "") {
   const lines = String(text || "").split(/\r?\n/);
+  const hasTable = lines.some((line) => isLikelyTableLine(line));
+  if (!hasTable) {
+    return `<div class="ocr-rendered-text">${renderTextBlockMarkup(lines)}</div>`;
+  }
+
   const blocks = [];
   let currentTextLines = [];
   let currentTableLines = [];
 
   function flushText() {
     if (currentTextLines.length) {
-      blocks.push(renderTextBlockMarkup(currentTextLines));
+      blocks.push(renderTextBlockMarkup(currentTextLines, true));
       currentTextLines = [];
     }
   }
@@ -870,6 +880,33 @@ function renderOcrTextMarkup(text = "") {
   return `<div class="ocr-rendered-text">${blocks.filter(Boolean).join("")}</div>`;
 }
 
+function buildOcrBatchSummaryCopyMarkup(payload = {}) {
+  const summary = payload.summary || {};
+  const processedCount = Number(summary.processedCount || 0);
+  const passedCount = Number(summary.passedCount || 0);
+  const failedCount = Number(summary.failedCount || 0);
+  const taskCount = payload.task ? 1 : 0;
+
+  if (!taskCount) {
+    return `
+      <div class="ocr-summary-copy">
+        <strong>No task was created from this batch.</strong>
+        <p class="helper-copy">Please try clearer survey photos and rerun the OCR intake.</p>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="ocr-summary-copy">
+      <strong>${escapeHtml(`${taskCount} task created from ${processedCount} image${processedCount === 1 ? "" : "s"}`)}</strong>
+      <p class="helper-copy">${escapeHtml(`${passedCount} of ${processedCount} processed image${processedCount === 1 ? "" : "s"} cleared the confidence threshold.`)}</p>
+      ${failedCount
+        ? `<p class="helper-copy">${escapeHtml(`${failedCount} image${failedCount === 1 ? "" : "s"} could not be processed in this batch.`)}</p>`
+        : ""}
+    </div>
+  `;
+}
+
 function buildOcrBatchResultMarkup(payload = {}) {
   const results = Array.isArray(payload.results) ? payload.results : [];
 
@@ -884,53 +921,125 @@ function buildOcrBatchResultMarkup(payload = {}) {
   return `
     <strong>OCR batch summary</strong>
     ${buildOcrBatchSummaryMarkup(payload.summary)}
-    <div class="ocr-result-stack">
-      ${results
-      .map((entry) => {
-        const statusLabel = entry.error
-          ? "Processing failed"
-          : entry.need?.needsReview
-            ? "Flagged for admin review"
-            : "Captured cleanly";
-        const previewMarkup = entry.imageUrl
-          ? `
-              <figure class="ocr-result-image-frame">
-                <img src="${escapeHtml(entry.imageUrl)}" alt="${escapeHtml(entry.filename || "Survey image")}" loading="lazy" />
-              </figure>
-            `
-          : "";
-
-        return `
-            <article class="ocr-result-card ${entry.error ? "has-error" : ""}">
-              ${previewMarkup}
-              <div class="ocr-result-copy">
-                <div class="ocr-result-header">
-                  <h4>${escapeHtml(entry.filename || "Survey image")}</h4>
-                  <span class="pill-tag">${escapeHtml(statusLabel)}</span>
-                </div>
-                ${entry.error
-            ? `<p class="helper-copy">${escapeHtml(entry.error)}</p>`
-            : `
-                      <p class="helper-copy">
-                        Provider: ${escapeHtml(entry.ocr?.provider || "OCR pipeline")}
-                        · Confidence: ${escapeHtml(formatConfidence(entry.ocr?.averageConfidence))}
-                      </p>
-                      <p class="helper-copy">
-                        Languages: ${escapeHtml(joinReadableList(entry.ocr?.languagesDetected || [], "Unspecified"))}
-                      </p>
-                      ${renderOcrTextMarkup(entry.ocr?.text || "")}
-                      ${entry.ocr?.lowConfidenceWords?.length
-              ? `<p class="helper-copy">Flagged words: ${escapeHtml(entry.ocr.lowConfidenceWords.join(", "))}</p>`
-              : ""
-            }
-                    `
-          }
-              </div>
-            </article>
-          `;
-      })
-      .join("")}
+    ${buildOcrBatchSummaryCopyMarkup(payload)}
+    <div class="ocr-summary-actions">
+      <button class="cta-button ocr-result-launch" id="ocrViewResultButton" type="button">
+        View Extracted Result →
+      </button>
     </div>
+  `;
+}
+
+function buildOcrCarouselCardMarkup(entry = {}, index = 0, activeIndex = 0, interactive = false) {
+  const confidence = entry.ocr?.averageConfidence;
+  const statusLabel = entry.error
+    ? "Processing failed"
+    : entry.capturedClearly
+      ? "Captured clearly"
+      : "Captured unclearly";
+  const statusClass = entry.error || !entry.capturedClearly ? "is-unclear" : "is-clear";
+  const actionAttributes = interactive
+    ? `type="button" data-ocr-image-select="${escapeHtml(String(index))}"`
+    : `type="button" disabled`;
+  const activeClass = interactive && index === activeIndex ? "is-active" : "";
+  const staticClass = interactive ? "" : "is-static";
+
+  return `
+    <button class="ocr-carousel-card ${activeClass} ${staticClass}" ${actionAttributes}>
+      ${entry.imageUrl
+        ? `<img src="${escapeHtml(entry.imageUrl)}" alt="${escapeHtml(entry.filename || `Survey image ${index + 1}`)}" loading="lazy" />`
+        : ""}
+      <strong>${escapeHtml(entry.filename || `Survey image ${index + 1}`)}</strong>
+      <p class="helper-copy">Confidence: ${escapeHtml(entry.error ? "Not available" : formatConfidence(confidence))}</p>
+      <span class="ocr-carousel-status ${statusClass}">${escapeHtml(statusLabel)}</span>
+    </button>
+  `;
+}
+
+function buildOcrExpandedPreviewMarkup(entry = {}) {
+  if (!entry?.imageUrl) {
+    return "";
+  }
+
+  return `
+    <div class="ocr-expanded-preview">
+      <strong>${escapeHtml(entry.filename || "Survey image")}</strong>
+      <p class="helper-copy">
+        Confidence: ${escapeHtml(entry.error ? "Not available" : formatConfidence(entry.ocr?.averageConfidence))}
+        · ${escapeHtml(entry.capturedClearly ? "Captured clearly" : entry.error ? "Processing failed" : "Captured unclearly")}
+      </p>
+      <img src="${escapeHtml(entry.imageUrl)}" alt="${escapeHtml(entry.filename || "Expanded survey image")}" loading="lazy" />
+    </div>
+  `;
+}
+
+function getMergedOcrContent(payload = {}) {
+  const merged = payload.merged && typeof payload.merged === "object" ? payload.merged : {};
+  const candidateValues = [
+    merged.formattedContent,
+    merged.cleanedContent,
+    merged.text,
+    merged.rawText,
+    payload.mergedContent,
+    payload.extractedText,
+    payload.content
+  ];
+  const resolvedValue = candidateValues.find((value) => String(value || "").trim());
+  if (resolvedValue) {
+    return String(resolvedValue).trim();
+  }
+
+  const resultFallback = (Array.isArray(payload.results) ? payload.results : [])
+    .map((entry) =>
+      String(
+        entry?.ocr?.formattedContent ||
+          entry?.ocr?.cleanedContent ||
+          entry?.ocr?.text ||
+          entry?.ocr?.rawText ||
+          ""
+      ).trim()
+    )
+    .filter(Boolean)
+    .join("\n\n");
+
+  return resultFallback;
+}
+
+function buildOcrBatchModalMarkup(payload = {}, activeIndex = 0) {
+  const results = Array.isArray(payload.results) ? payload.results.filter((entry) => entry.imageUrl) : [];
+  const merged = payload.merged || {};
+  const selectedEntry = results[activeIndex] || results[0] || {};
+  const hasMultipleImages = results.length > 1;
+  const taskTitle = payload.task?.title || "Extracted survey result";
+  const statusLabel = payload.task?.needsReview ? "Flagged for admin review" : "Ready for the volunteer feed";
+  const extractedText = getMergedOcrContent(payload);
+
+  return `
+    <div class="ocr-result-modal__header">
+      <h3 id="ocrResultModalTitle">${escapeHtml(taskTitle)}</h3>
+      <div class="ocr-result-modal__meta">
+        <span class="pill-tag">${escapeHtml(statusLabel)}</span>
+        <span class="pill-tag">Average confidence: ${escapeHtml(formatConfidence(merged.averageConfidence))}</span>
+        <span class="pill-tag">${escapeHtml(`${results.length} image${results.length === 1 ? "" : "s"}`)}</span>
+      </div>
+    </div>
+    <section class="ocr-carousel">
+      <div class="ocr-carousel__row">
+        ${results
+          .map((entry, index) => buildOcrCarouselCardMarkup(entry, index, activeIndex, hasMultipleImages))
+          .join("")}
+      </div>
+      ${hasMultipleImages ? buildOcrExpandedPreviewMarkup(selectedEntry) : ""}
+    </section>
+    <section class="ocr-merged-panel">
+      <div class="ocr-merged-panel__header">
+        <h4>Merged extracted content</h4>
+        <p class="helper-copy">This structured summary was created from the processed survey images in this batch.</p>
+      </div>
+      ${extractedText
+        ? renderOcrTextMarkup(extractedText)
+        : '<p class="helper-copy">No merged content was returned for this OCR batch.</p>'}
+    </section>
   `;
 }
 
@@ -1427,9 +1536,9 @@ function renderHeaderActions(currentUser) {
 function enforcePageGuard(currentUser) {
   const roleKey = getRoleKey(currentUser);
   const currentPageNavKey = getCurrentPageNavKey();
-  const visibleTabs = visibleTabsByRole[roleKey];
+  const allowedPageNavKeys = allowedPageNavKeysByRole[roleKey];
 
-  if (currentUser && visibleTabs && currentPageNavKey && !visibleTabs.includes(currentPageNavKey)) {
+  if (currentUser && allowedPageNavKeys && currentPageNavKey && !allowedPageNavKeys.includes(currentPageNavKey)) {
     setFlash("That page is not available for your current role.", "info");
     window.location.href = roleHomes[roleKey] || "./intelligence.html";
     return false;
@@ -2252,21 +2361,21 @@ async function initImpactPage(currentUser) {
   const clearNgoFilterBtn = document.getElementById("btnClearNgoFilter");
 
   function switchTab(tab) {
-    if (!dashboardTabBtn || !partnersTabBtn || !dashboardContent || !partnersContent) {
+    if (!dashboardContent || !partnersContent) {
       return;
     }
     if (tab === "dashboard") {
-      dashboardTabBtn.classList.remove("ghost-button");
-      dashboardTabBtn.classList.add("cta-button");
-      partnersTabBtn.classList.remove("cta-button");
-      partnersTabBtn.classList.add("ghost-button");
+      dashboardTabBtn?.classList.remove("ghost-button");
+      dashboardTabBtn?.classList.add("cta-button");
+      partnersTabBtn?.classList.remove("cta-button");
+      partnersTabBtn?.classList.add("ghost-button");
       dashboardContent.classList.remove("hidden");
       partnersContent.classList.add("hidden");
     } else if (tab === "partners") {
-      partnersTabBtn.classList.remove("ghost-button");
-      partnersTabBtn.classList.add("cta-button");
-      dashboardTabBtn.classList.remove("cta-button");
-      dashboardTabBtn.classList.add("ghost-button");
+      partnersTabBtn?.classList.remove("ghost-button");
+      partnersTabBtn?.classList.add("cta-button");
+      dashboardTabBtn?.classList.remove("cta-button");
+      dashboardTabBtn?.classList.add("ghost-button");
       partnersContent.classList.remove("hidden");
       dashboardContent.classList.add("hidden");
       void loadNgoList();
@@ -2310,15 +2419,15 @@ async function initImpactPage(currentUser) {
 
   function getStatusBadge(ngo) {
     if (!ngo.latestActivity) {
-      return { label: "New", color: "#3b82f6", bg: "rgba(59,130,246,0.1)" };
+      return { label: "New", tone: "new" };
     }
     const daysSince = Math.floor((Date.now() - new Date(ngo.latestActivity).getTime()) / 86400000);
     if (daysSince <= 30) {
-      return { label: "Active", color: "#10b981", bg: "rgba(16,185,129,0.1)" };
+      return { label: "Active", tone: "active" };
     } else if (daysSince <= 90) {
-      return { label: "Moderate", color: "#f59e0b", bg: "rgba(245,158,11,0.1)" };
+      return { label: "Moderate", tone: "moderate" };
     }
-    return { label: "Inactive", color: "#ef4444", bg: "rgba(239,68,68,0.1)" };
+    return { label: "Inactive", tone: "inactive" };
   }
 
   function renderNgoCard(ngo) {
@@ -2327,29 +2436,29 @@ async function initImpactPage(currentUser) {
       ? new Date(ngo.latestActivity).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })
       : "No activity yet";
     return `
-      <article class="task-card compact stable" style="margin-bottom: 16px; border: 1px solid var(--surface-border); padding: 18px; border-radius: 10px; background: var(--surface-background); transition: box-shadow 0.2s, transform 0.15s;" onmouseenter="this.style.boxShadow='0 4px 16px rgba(0,0,0,0.08)'; this.style.transform='translateY(-1px)'" onmouseleave="this.style.boxShadow='none'; this.style.transform='none'">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-          <span style="background: ${badge.bg}; color: ${badge.color}; padding: 3px 10px; border-radius: 20px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase;">${badge.label}</span>
-          <span style="font-size: 0.75rem; color: var(--text-secondary);">Last active: ${lastActive}</span>
+      <article class="task-card compact stable ngo-partner-card">
+        <div class="ngo-partner-card__top">
+          <span class="ngo-partner-badge" data-status-tone="${escapeHtml(badge.tone)}">${escapeHtml(badge.label)}</span>
+          <span class="ngo-partner-card__activity">Last active: ${escapeHtml(lastActive)}</span>
         </div>
-        <h3 style="margin: 0 0 4px 0; font-size: 1.15rem; font-weight: 600;">${escapeHtml(ngo.name)}</h3>
-        <p style="margin: 0 0 14px 0; font-size: 0.85rem; color: var(--text-secondary);">${escapeHtml(ngo.email)}</p>
-        <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px;">
-          <span style="display: inline-flex; align-items: center; gap: 4px; background: var(--interactive-gray); padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; color: var(--text-secondary);">
+        <h3 class="ngo-partner-card__name">${escapeHtml(ngo.name)}</h3>
+        <p class="ngo-partner-card__email">${escapeHtml(ngo.email)}</p>
+        <div class="ngo-partner-card__meta">
+          <span class="ngo-partner-pill">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
             ${escapeHtml(ngo.baseLocation || "No location")}
           </span>
-          <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(99,102,241,0.08); padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; color: #6366f1; font-weight: 500;">
+          <span class="ngo-partner-pill">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
             ${ngo.completedTasks}/${ngo.totalTasks} tasks done
           </span>
-          <span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(16,185,129,0.08); padding: 4px 10px; border-radius: 6px; font-size: 0.78rem; color: #10b981; font-weight: 500;">
+          <span class="ngo-partner-pill">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             ${ngo.peopleServed.toLocaleString()} people served
           </span>
         </div>
-        <div>
-          <button class="cta-button show-ngo-details-btn" type="button" data-id="${escapeHtml(ngo.id)}" data-name="${escapeHtml(ngo.name)}" style="min-height: 34px; padding: 6px 16px; font-size: 0.85rem; margin: 0;">View on Dashboard</button>
+        <div class="ngo-partner-card__actions">
+          <button class="cta-button show-ngo-details-btn ngo-dashboard-button" type="button" data-id="${escapeHtml(ngo.id)}" data-name="${escapeHtml(ngo.name)}">View on Dashboard</button>
         </div>
       </article>
     `;
@@ -2952,17 +3061,37 @@ async function initReportPage() {
   const audioForm = document.getElementById("audioUploadForm");
   const manualForm = document.getElementById("manualNeedForm");
   const ocrFileInput = ocrForm?.querySelector('input[name="image"]');
+  const ocrSubmitButton = document.getElementById("ocrSubmitButton");
   const ocrImagePreview = document.getElementById("ocrImagePreview");
+  const ocrProgressPanel = document.getElementById("ocrProgressPanel");
+  const ocrUploadError = document.getElementById("ocrUploadError");
   const recorderButton = document.getElementById("voiceRecorderButton");
   const voicePreview = document.getElementById("voicePreview");
   const ocrResult = document.getElementById("ocrResult");
+  const ocrResultModal = document.getElementById("ocrResultModal");
+  const ocrResultModalContent = document.getElementById("ocrResultModalContent");
+  const ocrResultModalClose = document.getElementById("ocrResultModalClose");
   const audioResult = document.getElementById("audioResult");
   const manualResult = document.getElementById("manualResult");
   let mediaRecorder = null;
   let recordedAudioBlob = null;
   let recordedChunks = [];
   let selectedSurveyFiles = [];
+  let latestOcrPayload = null;
+  let activeOcrModalIndex = 0;
+  let isSubmittingOcr = false;
+  let ocrProgressSteps = [];
+  let ocrProgressTimerIds = [];
+  let ocrProgressFadeTimerId = 0;
+  let ocrSlowNoticeTimerId = 0;
+  let showSlowOcrNotice = false;
   const surveyPreviewUrls = new Map();
+  const ocrProgressLabels = [
+    "Uploading image...",
+    "Running OCR extraction...",
+    "Analysing with Gemini...",
+    "Structuring results..."
+  ];
 
   if (!ocrForm && !audioForm && !manualForm) {
     return;
@@ -3002,6 +3131,184 @@ async function initReportPage() {
     renderSelectedSurveyFiles();
   }
 
+  function setOcrSubmitState(loading = false) {
+    isSubmittingOcr = loading;
+    if (!ocrSubmitButton) {
+      return;
+    }
+
+    ocrSubmitButton.disabled = loading || selectedSurveyFiles.length === 0;
+    ocrSubmitButton.innerHTML = loading
+      ? '<span class="ocr-submit-label"><span class="ocr-submit-spinner" aria-hidden="true"></span>Processing...</span>'
+      : "Run OCR";
+  }
+
+  function setOcrUploadError(message = "") {
+    if (!ocrUploadError) {
+      return;
+    }
+
+    ocrUploadError.textContent = message;
+    ocrUploadError.classList.toggle("hidden", !message);
+  }
+
+  function clearOcrProgressTimers() {
+    ocrProgressTimerIds.forEach((timerId) => window.clearTimeout(timerId));
+    ocrProgressTimerIds = [];
+    if (ocrProgressFadeTimerId) {
+      window.clearTimeout(ocrProgressFadeTimerId);
+      ocrProgressFadeTimerId = 0;
+    }
+    if (ocrSlowNoticeTimerId) {
+      window.clearTimeout(ocrSlowNoticeTimerId);
+      ocrSlowNoticeTimerId = 0;
+    }
+  }
+
+  function renderOcrProgressPanel() {
+    if (!ocrProgressPanel) {
+      return;
+    }
+
+    if (!ocrProgressSteps.length) {
+      ocrProgressPanel.innerHTML = "";
+      ocrProgressPanel.classList.add("hidden");
+      return;
+    }
+
+    ocrProgressPanel.classList.remove("hidden");
+    ocrProgressPanel.innerHTML = `
+      ${ocrProgressSteps
+        .map(
+          (step) => `
+            <div class="ocr-progress-step" data-state="${escapeHtml(step.state)}">
+              <span class="ocr-progress-marker">${step.state === "complete" ? "✓" : ""}</span>
+              <span>${escapeHtml(step.label)}</span>
+            </div>
+          `
+        )
+        .join("")}
+      ${showSlowOcrNotice ? '<p class="ocr-progress-slow-note">This is taking longer than usual - please wait.</p>' : ""}
+    `;
+  }
+
+  function setOcrProgressCurrentStep(index) {
+    ocrProgressSteps = ocrProgressSteps.map((step, stepIndex) => {
+      if (stepIndex < index) {
+        return { ...step, state: "complete" };
+      }
+      if (stepIndex === index) {
+        return { ...step, state: "current" };
+      }
+      return { ...step, state: "pending" };
+    });
+    renderOcrProgressPanel();
+  }
+
+  function startOcrProgress() {
+    clearOcrProgressTimers();
+    showSlowOcrNotice = false;
+    ocrProgressSteps = ocrProgressLabels.map((label, index) => ({
+      label,
+      state: index === 0 ? "current" : "pending"
+    }));
+    renderOcrProgressPanel();
+
+    ocrProgressTimerIds = [
+      window.setTimeout(() => setOcrProgressCurrentStep(1), 900),
+      window.setTimeout(() => setOcrProgressCurrentStep(2), 4900),
+      window.setTimeout(() => setOcrProgressCurrentStep(3), 7900)
+    ];
+    ocrSlowNoticeTimerId = window.setTimeout(() => {
+      showSlowOcrNotice = true;
+      renderOcrProgressPanel();
+    }, 30000);
+  }
+
+  function completeOcrProgress() {
+    clearOcrProgressTimers();
+    showSlowOcrNotice = false;
+    ocrProgressSteps = ocrProgressLabels.map((label) => ({
+      label,
+      state: "complete"
+    }));
+    renderOcrProgressPanel();
+    ocrProgressFadeTimerId = window.setTimeout(() => {
+      ocrProgressSteps = [];
+      renderOcrProgressPanel();
+    }, 2000);
+  }
+
+  function failOcrProgress(message = "") {
+    clearOcrProgressTimers();
+    showSlowOcrNotice = false;
+    ocrProgressSteps = [];
+    renderOcrProgressPanel();
+    setOcrUploadError(message);
+  }
+
+  function renderOcrSummary(payload = {}) {
+    latestOcrPayload = payload;
+    if (!ocrResult) {
+      return;
+    }
+
+    ocrResult.innerHTML = buildOcrBatchResultMarkup(payload);
+    const resultButton = document.getElementById("ocrViewResultButton");
+    if (resultButton) {
+      resultButton.addEventListener("click", () => {
+        openOcrResultModal(0);
+      });
+    }
+  }
+
+  function renderOcrResultModal() {
+    if (!ocrResultModalContent || !latestOcrPayload) {
+      return;
+    }
+
+    ocrResultModalContent.innerHTML = buildOcrBatchModalMarkup(latestOcrPayload, activeOcrModalIndex);
+  }
+
+  function openOcrResultModal(index = 0) {
+    if (!ocrResultModal || !latestOcrPayload) {
+      return;
+    }
+
+    const imageCount = Array.isArray(latestOcrPayload.results)
+      ? latestOcrPayload.results.filter((entry) => entry.imageUrl).length
+      : 0;
+    activeOcrModalIndex = Math.min(Math.max(index, 0), Math.max(imageCount - 1, 0));
+    renderOcrResultModal();
+    ocrResultModal.classList.remove("hidden");
+    ocrResultModal.setAttribute("aria-hidden", "false");
+  }
+
+  function closeOcrResultModal() {
+    if (!ocrResultModal) {
+      return;
+    }
+
+    ocrResultModal.classList.add("hidden");
+    ocrResultModal.setAttribute("aria-hidden", "true");
+  }
+
+  function highlightOcrResultButton() {
+    const resultButton = document.getElementById("ocrViewResultButton");
+    if (!resultButton) {
+      return;
+    }
+
+    resultButton.scrollIntoView({
+      behavior: "smooth",
+      block: "center"
+    });
+    resultButton.classList.add("is-highlighted");
+    window.setTimeout(() => {
+      resultButton.classList.remove("is-highlighted");
+    }, 1500);
+  }
+
   function renderSelectedSurveyFiles() {
     if (!ocrImagePreview) {
       return;
@@ -3009,6 +3316,7 @@ async function initReportPage() {
 
     if (!selectedSurveyFiles.length) {
       ocrImagePreview.innerHTML = "";
+      setOcrSubmitState(false);
       return;
     }
 
@@ -3038,11 +3346,44 @@ async function initReportPage() {
         `;
       })
       .join("");
+    setOcrSubmitState(false);
   }
 
   if (ocrForm) {
+    setOcrSubmitState(false);
+
+    if (ocrResultModalClose) {
+      ocrResultModalClose.addEventListener("click", closeOcrResultModal);
+    }
+
+    if (ocrResultModal) {
+      ocrResultModal.addEventListener("click", (event) => {
+        if (event.target === ocrResultModal) {
+          closeOcrResultModal();
+        }
+      });
+    }
+
+    if (ocrResultModalContent) {
+      ocrResultModalContent.addEventListener("click", (event) => {
+        const thumbnailButton = event.target.closest("[data-ocr-image-select]");
+        if (!thumbnailButton) {
+          return;
+        }
+
+        const nextIndex = Number(thumbnailButton.dataset.ocrImageSelect || 0);
+        if (!Number.isInteger(nextIndex) || nextIndex < 0) {
+          return;
+        }
+
+        activeOcrModalIndex = nextIndex;
+        renderOcrResultModal();
+      });
+    }
+
     if (ocrFileInput) {
       ocrFileInput.addEventListener("change", () => {
+        setOcrUploadError("");
         const incomingFiles = Array.from(ocrFileInput.files || []);
         const existingKeys = new Set(selectedSurveyFiles.map((file) => createFileSelectionKey(file)));
 
@@ -3076,6 +3417,7 @@ async function initReportPage() {
           releaseSurveyPreview(removedFile);
         }
         syncSelectedSurveyFiles();
+        setOcrUploadError("");
         renderSelectedSurveyFiles();
       });
     }
@@ -3091,13 +3433,17 @@ async function initReportPage() {
       selectedSurveyFiles.forEach((file) => formData.append("image", file));
 
       try {
+        setOcrUploadError("");
+        closeOcrResultModal();
+        setOcrSubmitState(true);
+        startOcrProgress();
         const result = await apiFetch("/api/surveys", {
           method: "POST",
           body: formData
         });
-        if (ocrResult) {
-          ocrResult.innerHTML = buildOcrBatchResultMarkup(result);
-        }
+        console.log("OCR response:", result);
+        completeOcrProgress();
+        renderOcrSummary(result);
         const summary = result.summary || {};
         const processedCount = Number(summary.processedCount || 0);
         const failedCount = Number(summary.failedCount || 0);
@@ -3107,8 +3453,12 @@ async function initReportPage() {
         showGlobalBanner(bannerMessage, failedCount ? "info" : "success");
         ocrForm.reset();
         resetSurveySelection();
+        highlightOcrResultButton();
       } catch (error) {
+        failOcrProgress(error.message || "OCR upload failed.");
         showGlobalBanner(error.message || "OCR upload failed.", "error");
+      } finally {
+        setOcrSubmitState(false);
       }
     });
   }

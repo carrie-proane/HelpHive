@@ -1922,11 +1922,6 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: 0,
       field: "reports_confirmed"
-    },
-    baseLocation: {
-      type: DataTypes.STRING,
-      allowNull: true,
-      field: "base_location"
     }
   },
   {
@@ -3708,8 +3703,10 @@ async function buildReviewQueue() {
       locationName: review.task.locationName,
       confidence: Number(review.confidence),
       rawText: review.rawText || "",
+      raw_content: review.correctedPayload?.rawExtractedText || review.rawText || "",
       rawExtractedText: review.correctedPayload?.rawExtractedText || "",
       cleanedContent: review.correctedPayload?.cleaned_content || "",
+      cleaned_content: review.correctedPayload?.cleaned_content || "",
       formattedContent:
         review.correctedPayload?.formattedContent ||
         review.rawText ||
@@ -3725,7 +3722,9 @@ async function buildReviewQueue() {
       pipeline: review.correctedPayload?.pipeline || {},
       languages: review.correctedPayload?.languages || [],
       imageUrl: review.correctedPayload?.imageUrl || null,
-      imageUrls: review.correctedPayload?.imageUrls || []
+      image_url: review.correctedPayload?.imageUrl || null,
+      imageUrls: review.correctedPayload?.imageUrls || [],
+      image_urls: review.correctedPayload?.imageUrls || []
     }));
 }
 
@@ -4491,6 +4490,12 @@ function normalizeSurveyTableFormattingResult(parsed, rawText = "") {
   };
 }
 
+function isLikelyMarkdownTable(text = "") {
+  return String(text || "")
+    .split(/\r?\n/)
+    .some((line) => (String(line).match(/\|/g) || []).length >= 2);
+}
+
 async function formatSurveyTableContent(filePath, mimeType = "", rawText = "") {
   const normalizedRawText = String(rawText || "").trim();
   if (!normalizedRawText || !geminiClient) {
@@ -4619,6 +4624,96 @@ async function runOCR(filePath, mimeType = "") {
     ]),
     structuredExtraction: mergedExtraction,
     engines: successes.flatMap((entry) => entry.engines || [])
+  };
+}
+
+async function mergeSurveyBatchExtractions(extractions = []) {
+  const normalizedExtractions = (Array.isArray(extractions) ? extractions : []).filter(
+    (entry) => entry && (entry.rawText || entry.text || entry.formattedContent)
+  );
+
+  if (!normalizedExtractions.length) {
+    return {
+      text: "",
+      rawText: "",
+      cleanedContent: "",
+      averageConfidence: 0,
+      languagesDetected: [],
+      lowConfidenceWords: [],
+      keyPhrases: [],
+      structuredExtraction: {}
+    };
+  }
+
+  const mergedFallbackText = normalizedExtractions
+    .map((entry) =>
+      String(entry.formattedContent || entry.cleanedContent || entry.text || entry.rawText || "").trim()
+    )
+    .filter(Boolean)
+    .join("\n\n");
+
+  const rawText = normalizedExtractions
+    .map((entry, index) => {
+      const label = `Page ${index + 1}${entry.filename ? ` (${entry.filename})` : ""}`;
+      return `${label}\n${String(entry.rawText || entry.text || entry.formattedContent || "").trim()}`;
+    })
+    .filter(Boolean)
+    .join("\n\n---\n\n")
+    .trim();
+
+  const cleanedInput = normalizedExtractions
+    .map((entry, index) => {
+      const label = `Page ${index + 1}${entry.filename ? ` (${entry.filename})` : ""}`;
+      return `${label}\n${String(entry.cleanedContent || entry.formattedContent || entry.text || entry.rawText || "").trim()}`;
+    })
+    .filter(Boolean)
+    .join("\n\n---\n\n")
+    .trim();
+
+  let mergedText = cleanedInput || rawText;
+  if (geminiClient && mergedText) {
+    try {
+      mergedText = await runGeminiPlainText(
+        [
+          "The following are OCR extractions from multiple pages of the same community survey form. Merge them into one coherent structured summary, removing duplicates and preserving all unique names, numbers, locations, needs, and severity information. Return the merged result as clean structured text.",
+          "If any section is tabular, preserve it as a Markdown table.",
+          cleanedInput || rawText
+        ].join("\n\n")
+      );
+    } catch (error) {
+      console.warn(`Survey batch merge fallback used: ${error.message}`);
+      mergedText = cleanedInput || rawText;
+    }
+  }
+
+  const mergedContent = String(mergedText || "").trim() || mergedFallbackText || cleanedInput || rawText;
+
+  const averageConfidence = clampConfidence(
+    normalizedExtractions.reduce((sum, entry) => sum + Number(entry.averageConfidence || 0), 0) /
+      normalizedExtractions.length,
+    0
+  );
+  const cleanedContent = await reconstructLowConfidenceSurveyText(rawText, averageConfidence);
+
+  return {
+    text: String(mergedContent || "").trim(),
+    rawText,
+    cleanedContent: String(cleanedContent || "").trim(),
+    averageConfidence: Number(averageConfidence.toFixed(2)),
+    languagesDetected: uniqueValues(
+      normalizedExtractions.flatMap((entry) => normalizeArray(entry.languagesDetected))
+    ),
+    lowConfidenceWords: uniqueValues(
+      normalizedExtractions.flatMap((entry) => normalizeArray(entry.lowConfidenceWords))
+    ).slice(0, 16),
+    keyPhrases: uniqueValues(
+      normalizedExtractions.flatMap((entry) => normalizeArray(entry.keyPhrases))
+    ).slice(0, 12),
+    structuredExtraction: normalizedExtractions.reduce(
+      (mergedSignals, entry) =>
+        mergeExtractionSignals(mergedSignals, entry.structuredExtraction || {}),
+      {}
+    )
   };
 }
 
@@ -5948,9 +6043,9 @@ app.post(
 
       const batchImageUrls = files.map((file) => buildUploadUrl(request, file.filename)).filter(Boolean);
       const results = [];
+      const successfulExtractions = [];
       let processedCount = 0;
       let passedCount = 0;
-      let flaggedCount = 0;
       let failedCount = 0;
 
       for (const file of files) {
@@ -5959,79 +6054,23 @@ app.post(
 
         try {
           const ocr = await runOCR(file.path, file.mimetype || "");
-          const routingText = ocr.rawText || ocr.text || "";
-          const displayText = ocr.formattedContent || ocr.text || routingText;
-          const parsed = extractNeedSignals(routingText, ocr.structuredExtraction || {});
-          const needsReview = shouldRequireReview(ocr.averageConfidence, ocr.lowConfidenceWords);
-          const task = await createTaskRecord({
-            ngoUserId: request.user.id,
-            source: "ocr",
-            status: needsReview ? TASK_STATUS.PENDING_REVIEW : TASK_STATUS.OPEN,
-            description: displayText || "OCR survey intake",
-            extractedText: displayText,
-            title: parsed.title,
-            type: parsed.type,
-            severity: parsed.severity,
-            locationName: parsed.locationName,
-            latitude: parsed.latitude,
-            longitude: parsed.longitude,
-            requiredSkills: parsed.requiredSkills,
-            complementarySkills: parsed.complementarySkills,
-            preferredLanguages: parsed.preferredLanguages,
-            preferredCommunicationStyles: parsed.preferredCommunicationStyles,
-            contextTags: parsed.contextTags,
-            minimumMedicalTraining: parsed.minimumMedicalTraining,
-            category: parsed.category,
-            timeWindows: parsed.timeWindows,
-            peopleServed: inferPeopleServed(parsed.type, parsed.severity)
-          });
-
-          const review = await createReviewIfNeeded({
-            taskId: task.id,
-            source: "ocr",
-            rawText: displayText,
-            rawExtractedText: routingText,
-            cleanedContent: ocr.cleanedContent,
-            formattedContent: displayText,
-            hasTable: ocr.hasTable,
-            confidence: ocr.averageConfidence,
-            suggestedType: parsed.type,
-            suggestedSeverity: parsed.severity,
-            suggestedLocation: parsed.locationName,
-            flaggedWords: ocr.lowConfidenceWords,
-            evidence: parsed.evidence,
-            pipeline: {
-              provider: ocr.provider,
-              model: ocr.model,
-              engines: ocr.engines,
-              keyPhrases: ocr.keyPhrases
-            },
-            languages: ocr.languagesDetected,
-            imageUrl,
-            imageUrls: batchImageUrls
-          });
-
+          const capturedClearly = !shouldRequireReview(ocr.averageConfidence, ocr.lowConfidenceWords);
           processedCount += 1;
-          if (review) {
-            flaggedCount += 1;
-          } else {
+          if (capturedClearly) {
             passedCount += 1;
           }
 
+          successfulExtractions.push({
+            ...ocr,
+            filename,
+            imageUrl
+          });
           results.push({
             filename,
             imageUrl,
             imageUrls: batchImageUrls,
             ocr,
-            need: {
-              id: task.id,
-              title: task.title,
-              type: task.type,
-              severity: task.severity,
-              locationName: task.locationName,
-              needsReview: Boolean(review)
-            },
-            reviewId: review?.id || null
+            capturedClearly
           });
         } catch (error) {
           failedCount += 1;
@@ -6039,19 +6078,100 @@ app.post(
             filename,
             imageUrl,
             imageUrls: batchImageUrls,
+            capturedClearly: false,
             error: error.message || "Survey image could not be processed."
           });
         }
       }
+
+      if (!successfulExtractions.length) {
+        const error = new Error("No survey images could be processed from this upload.");
+        error.statusCode = 422;
+        throw error;
+      }
+
+      const mergedBatch = await mergeSurveyBatchExtractions(successfulExtractions);
+      const mergedContent = String(mergedBatch.text || "").trim();
+      console.log("Merged content:", mergedContent);
+      const routingText = mergedBatch.rawText || mergedBatch.text || "";
+      const displayText = mergedBatch.cleanedContent || mergedContent || routingText;
+      const parsed = extractNeedSignals(displayText, mergedBatch.structuredExtraction || {});
+      const needsReview = shouldRequireReview(mergedBatch.averageConfidence, mergedBatch.lowConfidenceWords);
+      const task = await createTaskRecord({
+        ngoUserId: request.user.id,
+        source: "ocr",
+        status: needsReview ? TASK_STATUS.PENDING_REVIEW : TASK_STATUS.OPEN,
+        description: displayText || "OCR survey intake",
+        extractedText: displayText,
+        title: parsed.title,
+        type: parsed.type,
+        severity: parsed.severity,
+        locationName: parsed.locationName,
+        latitude: parsed.latitude,
+        longitude: parsed.longitude,
+        requiredSkills: parsed.requiredSkills,
+        complementarySkills: parsed.complementarySkills,
+        preferredLanguages: parsed.preferredLanguages,
+        preferredCommunicationStyles: parsed.preferredCommunicationStyles,
+        contextTags: parsed.contextTags,
+        minimumMedicalTraining: parsed.minimumMedicalTraining,
+        category: parsed.category,
+        timeWindows: parsed.timeWindows,
+        peopleServed: inferPeopleServed(parsed.type, parsed.severity),
+        mediaUrl: batchImageUrls[0] || null
+      });
+
+      const review = await createReviewIfNeeded({
+        taskId: task.id,
+        source: "ocr",
+        rawText: displayText,
+        rawExtractedText: routingText,
+        cleanedContent: mergedBatch.cleanedContent,
+        formattedContent: mergedContent,
+        hasTable: isLikelyMarkdownTable(mergedContent),
+        confidence: mergedBatch.averageConfidence,
+        suggestedType: parsed.type,
+        suggestedSeverity: parsed.severity,
+        suggestedLocation: parsed.locationName,
+        flaggedWords: mergedBatch.lowConfidenceWords,
+        evidence: parsed.evidence,
+        pipeline: {
+          provider: "OCR batch merge",
+          model: GEMINI_MULTIMODAL_MODEL,
+          engines: successfulExtractions.flatMap((entry) => entry.engines || []),
+          keyPhrases: mergedBatch.keyPhrases
+        },
+        languages: mergedBatch.languagesDetected,
+        imageUrl: batchImageUrls[0] || null,
+        imageUrls: batchImageUrls
+      });
 
       response.status(201).json({
         summary: {
           submittedCount: files.length,
           processedCount,
           passedCount,
-          flaggedCount,
+          flaggedCount: review ? 1 : 0,
           failedCount
         },
+        task: {
+          id: task.id,
+          title: task.title,
+          type: task.type,
+          severity: task.severity,
+          locationName: task.locationName,
+          needsReview: Boolean(review)
+        },
+        merged: {
+          text: mergedContent,
+          rawText: mergedBatch.rawText,
+          cleanedContent: mergedBatch.cleanedContent,
+          formattedContent: mergedContent,
+          averageConfidence: mergedBatch.averageConfidence,
+          languagesDetected: mergedBatch.languagesDetected,
+          keyPhrases: mergedBatch.keyPhrases
+        },
+        reviewId: review?.id || null,
         results
       });
     } catch (error) {
@@ -6398,7 +6518,8 @@ app.get("/api/ngos", requireAuth, async (request, response, next) => {
   try {
     const ngos = await User.findAll({
       where: { role: "ngo" },
-      attributes: ["id", "name", "email", "baseLocation"],
+      attributes: ["id", "name", "email"],
+      include: [{ model: Volunteer, as: "volunteerProfile", attributes: ["baseLocation"], required: false }],
       order: [["name", "ASC"]]
     });
 
@@ -6440,7 +6561,7 @@ app.get("/api/ngos", requireAuth, async (request, response, next) => {
           id: ngo.id,
           name: ngo.name,
           email: ngo.email,
-          baseLocation: ngo.baseLocation,
+          baseLocation: ngo.volunteerProfile?.baseLocation || "",
           totalTasks: stats.totalTasks,
           completedTasks: stats.completedTasks,
           peopleServed: stats.peopleServed,
@@ -6472,16 +6593,21 @@ app.post("/api/ngos", requireAuth, requireRole(["corporate", "admin"]), async (r
       name: name.trim(),
       email: email.toLowerCase().trim(),
       passwordHash: await bcrypt.hash(password, 10),
-      role: "ngo",
-      baseLocation: baseLocation ? baseLocation.trim() : null
+      role: "ngo"
     });
+
+    await ensureVolunteerProfileForUser(ngoUser.id, {
+      baseLocation: baseLocation ? baseLocation.trim() : ""
+    });
+
+    const createdNgo = await getUserWithProfile(ngoUser.id);
 
     response.status(201).json({
       ngo: {
-        id: ngoUser.id,
-        name: ngoUser.name,
-        email: ngoUser.email,
-        baseLocation: ngoUser.baseLocation
+        id: createdNgo.id,
+        name: createdNgo.name,
+        email: createdNgo.email,
+        baseLocation: createdNgo.volunteerProfile?.baseLocation || ""
       }
     });
   } catch (error) {
