@@ -1,11 +1,17 @@
 const HIGH_TRUST_THRESHOLD = 0.8;
+const LOW_TRUST_THRESHOLD = 0.4;
 
 function evaluateTaskStatus(task = {}, reporter = {}) {
-  if (Number(reporter.trust_score ?? reporter.trustScore ?? 0) >= HIGH_TRUST_THRESHOLD) {
+  const trustScore = Number(reporter.trust_score ?? reporter.trustScore ?? 0);
+
+  if (trustScore >= HIGH_TRUST_THRESHOLD) {
     return "auto_accepted";
   }
 
-  if (Number(task.confirmation_count ?? task.confirmationCount ?? 0) >= 2) {
+  const confirmationCount = Number(task.confirmation_count ?? task.confirmationCount ?? 0);
+  const requiredConfirmations = trustScore < LOW_TRUST_THRESHOLD ? 4 : 2;
+
+  if (confirmationCount >= requiredConfirmations) {
     return "confirmed";
   }
 
@@ -54,6 +60,7 @@ async function updateTrustScore(userId, wasValid, queryable) {
 
 module.exports = {
   HIGH_TRUST_THRESHOLD,
+  LOW_TRUST_THRESHOLD,
   evaluateTaskStatus,
   updateTrustScore
 };

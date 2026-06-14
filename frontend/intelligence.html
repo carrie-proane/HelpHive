@@ -45,7 +45,7 @@
           <a href="./join.html" data-nav="join">Join</a>
           <a href="./admin.html" data-nav="admin_dashboard" data-role-tab="ngo_admin" hidden>Admin Dashboard</a>
           <a href="./report.html" data-nav="field_desk" data-role-tab="ngo_worker" hidden>Field Desk</a>
-          <a href="./intelligence.html" data-nav="my_tasks" data-role-tab="volunteer" hidden>My Tasks</a>
+          <a href="./my-tasks.html" data-nav="my_tasks" data-role-tab="volunteer" hidden>My Tasks</a>
           <a href="./impact.html" data-nav="csr_dashboard" data-role-tab="csr" hidden>CSR Dashboard</a>
         </nav>
         <div class="header-actions">
@@ -88,6 +88,7 @@
                   <a class="cta-button" href="#ward-map">Open the map</a>
                   <a class="ghost-button" href="./community.html">Meet the network</a>
                 </div>
+                <div id="gamificationCard"></div>
                 <div class="quick-stats">
                   <div class="stat-chip">
                     <span>High-intensity wards</span>
@@ -258,6 +259,19 @@
               <p data-role-copy>
                 Open tasks, buddy recommendations, and completion actions are all
                 visible here for the current response flow.
+              </p>
+            </div>
+            
+            <div class="dispatch-toggle-container">
+              <label class="dispatch-toggle-label">
+                <span class="dispatch-toggle-text">Auto-Assign Mode</span>
+                <div class="dispatch-switch">
+                  <input type="checkbox" id="dispatchModeToggle-intel" checked>
+                  <span class="dispatch-slider"></span>
+                </div>
+              </label>
+              <p class="dispatch-toggle-hint" id="dispatchModeHint-intel">
+                You will be automatically assigned nearby urgent tasks via push alerts.
               </p>
             </div>
 
@@ -439,6 +453,13 @@
         <button class="sheet-close" type="button" aria-label="Close map details">Close</button>
       </div>
       <div class="sheet-content"></div>
+    </div>
+
+    <div id="autoAssignModal" class="task-detail-modal hidden" role="dialog" aria-modal="true" aria-labelledby="autoAssignTitle">
+      <div class="task-detail-backdrop"></div>
+      <article class="task-detail-panel auto-assign-panel">
+        <div id="autoAssignContent"></div>
+      </article>
     </div>
 
     <script

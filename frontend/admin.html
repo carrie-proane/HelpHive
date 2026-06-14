@@ -39,7 +39,7 @@
           <a href="./join.html" data-nav="join">Join</a>
           <a href="./admin.html" data-nav="admin_dashboard" data-role-tab="ngo_admin" hidden>Admin Dashboard</a>
           <a href="./report.html" data-nav="field_desk" data-role-tab="ngo_worker" hidden>Field Desk</a>
-          <a href="./intelligence.html" data-nav="my_tasks" data-role-tab="volunteer" hidden>My Tasks</a>
+          <a href="./my-tasks.html" data-nav="my_tasks" data-role-tab="volunteer" hidden>My Tasks</a>
           <a href="./impact.html" data-nav="csr_dashboard" data-role-tab="csr" hidden>CSR Dashboard</a>
         </nav>
         <div class="header-actions">
@@ -111,6 +111,35 @@
               </div>
               <div class="task-stack" id="matchResults">
                 <div class="empty-state"><p>Matching results will appear here.</p></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section fade-in">
+          <div class="sheet coral">
+            <div class="section-heading">
+              <div>
+                <span class="eyebrow">Safety &amp; vetting</span>
+                <h2>Active SOS alerts and high-impact tasks needing approval</h2>
+              </div>
+              <p>
+                SOS alerts from volunteers in the field, and high-impact tasks that
+                need coordinator sign-off before going live.
+              </p>
+            </div>
+            <div class="split-panel">
+              <div>
+                <h3 class="sub-section-title">🚨 Active SOS Alerts</h3>
+                <div class="task-stack" id="sosAlertStack">
+                  <div class="empty-state"><p>Loading SOS alerts...</p></div>
+                </div>
+              </div>
+              <div>
+                <h3 class="sub-section-title">📋 Vetting Queue</h3>
+                <div class="task-stack" id="vettingQueue">
+                  <div class="empty-state"><p>Loading vetting queue...</p></div>
+                </div>
               </div>
             </div>
           </div>

@@ -45,9 +45,10 @@ if (SHOULD_LOAD_LOCAL_ENV_FILES) {
 const app = express();
 // Use the port provided by Google, otherwise default to 8080
 const port = Number(process.env.PORT || 8080);
+const host = process.env.HOST || process.env.BIND_HOST || "0.0.0.0";
 const JWT_SECRET = process.env.JWT_SECRET || "kindred-dev-secret";
 const DEFAULT_DATABASE_URL = "postgres://postgres:postgres@127.0.0.1:5432/kindredpune";
-const DB_LOCATION_MODE = String(process.env.DB_LOCATION_MODE || "postgis").trim().toLowerCase();
+const DB_LOCATION_MODE = String(process.env.DB_LOCATION_MODE || "jsonb").trim().toLowerCase();
 const USE_POSTGIS = DB_LOCATION_MODE !== "jsonb";
 const ROOT_DIR = path.join(__dirname, "..");
 const FRONTEND_DIR = path.join(ROOT_DIR, "frontend");
@@ -86,15 +87,19 @@ const GEMINI_AUDIO_MODEL = process.env.GEMINI_AUDIO_MODEL || "gemini-2.5-flash";
 const MAP_REFRESH_CENTER = { lat: 18.5204, lng: 73.8567 };
 const DB_CONNECTION_RETRY_ATTEMPTS = Number(process.env.DB_CONNECTION_RETRY_ATTEMPTS || 12);
 const DB_CONNECTION_RETRY_DELAY_MS = Number(process.env.DB_CONNECTION_RETRY_DELAY_MS || 2500);
+const DB_CONNECTION_TIMEOUT_MS = Number(process.env.DB_CONNECTION_TIMEOUT_MS || 5000);
 const DISPATCH_H3_RESOLUTION = Number(process.env.DISPATCH_H3_RESOLUTION || 8);
 const DISPATCH_DEFAULT_RADIUS_METERS = Number(process.env.DISPATCH_DEFAULT_RADIUS_METERS || 7500);
-const DISPATCH_ROUTE_TIMEOUT_MS = Number(process.env.DISPATCH_ROUTE_TIMEOUT_MS || 2500);
+const DISPATCH_ROUTE_TIMEOUT_MS = Number(process.env.DISPATCH_ROUTE_TIMEOUT_MS || 800);
+const DISPATCH_MAX_ROUTE_CANDIDATES = Number(process.env.DISPATCH_MAX_ROUTE_CANDIDATES || 5);
 const DISPATCH_AVERAGE_SPEED_KMPH = Number(process.env.DISPATCH_AVERAGE_SPEED_KMPH || 22);
 const ROUTING_ENGINE = String(process.env.ROUTING_ENGINE || "osrm").trim().toLowerCase();
 const ROUTING_ENGINE_URL = String(process.env.ROUTING_ENGINE_URL || "").replace(/\/+$/, "");
 const ROUTING_ENGINE_API_KEY = process.env.ROUTING_ENGINE_API_KEY || "";
+const DISPATCH_REMOTE_ROUTING = process.env.DISPATCH_REMOTE_ROUTING === "true";
 const REDIS_URL = process.env.REDIS_URL || (isRunningInDocker() ? "redis://redis:6379" : "redis://127.0.0.1:6379");
 const DISPATCH_USE_REDIS = process.env.DISPATCH_USE_REDIS !== "false";
+const DISPATCH_REDIS_CONNECT_TIMEOUT_MS = Number(process.env.DISPATCH_REDIS_CONNECT_TIMEOUT_MS || 1000);
 const DISPATCH_WS_PATH = process.env.DISPATCH_WS_PATH || "/dispatch/ws";
 const DISPATCH_GEO_VOLUNTEERS_KEY = process.env.DISPATCH_GEO_VOLUNTEERS_KEY || "dispatch:geo:volunteers";
 const DISPATCH_GEO_TASKS_KEY = process.env.DISPATCH_GEO_TASKS_KEY || "dispatch:geo:tasks";
@@ -297,7 +302,14 @@ function buildUploadUrl(request, filename) {
 
 function shouldRetryDatabaseConnection(error) {
   const code = error?.original?.code || error?.parent?.code || error?.code;
-  return code === "ECONNREFUSED" || code === "ENOTFOUND" || code === "EHOSTUNREACH";
+  const message = String(error?.message || error?.original?.message || error?.parent?.message || "");
+  return (
+    code === "ECONNREFUSED" ||
+    code === "ENOTFOUND" ||
+    code === "EHOSTUNREACH" ||
+    code === "ETIMEDOUT" ||
+    /timeout expired|connection timeout|connect etimedout/i.test(message)
+  );
 }
 
 function shouldUseDatabaseSsl(databaseConnection) {
@@ -337,7 +349,11 @@ let redisReady = false;
 const sequelizeOptions = {
   dialect: "postgres",
   logging: false,
-  dialectOptions: DATABASE_SSL_ENABLED ? { ssl: { require: true, rejectUnauthorized: false } } : {}
+  dialectOptions: {
+    connectionTimeoutMillis: DB_CONNECTION_TIMEOUT_MS,
+    connectTimeout: DB_CONNECTION_TIMEOUT_MS,
+    ...(DATABASE_SSL_ENABLED ? { ssl: { require: true, rejectUnauthorized: false } } : {})
+  }
 };
 
 const sequelize = DATABASE_CONNECTION.connectionString
@@ -367,6 +383,7 @@ const ROLE_LABELS = {
 const TASK_STATUS = {
   OPEN: "open",
   PENDING_REVIEW: "pending_review",
+  PENDING_VETTING: "pending_vetting",
   REJECTED: "rejected",
   COMPLETED: "completed",
   PENDING: "pending",
@@ -591,6 +608,15 @@ function buildLiveTaskWhere(additionalWhere = {}) {
     completedAt: null,
     ...additionalWhere
   };
+}
+
+const LOW_TRUST_THRESHOLD = 0.4;
+
+function isHighImpactTask({ severity, peopleServed, description }) {
+  if (severity === "critical") return true;
+  if (Number(peopleServed || 0) >= 50) return true;
+  if (String(description || "").toLowerCase().includes("large aid request")) return true;
+  return false;
 }
 
 function normalizeMedicalTraining(value = "") {
@@ -854,6 +880,14 @@ const volunteerDispatchModes = new Map();
 const dispatchWorkQueue = [];
 let dispatchWorkScheduled = false;
 let dispatchWorkRunning = false;
+const appState = {
+  databaseReady: false,
+  schemaReady: false,
+  schemaMaintenanceRunning: false,
+  initializationStartedAt: null,
+  initializationCompletedAt: null,
+  startupError: null
+};
 
 function isRedisUsable() {
   return Boolean(redisClient && redisReady);
@@ -879,12 +913,22 @@ async function connectRedis() {
   });
 
   try {
-    await redisClient.connect();
+    await Promise.race([
+      redisClient.connect(),
+      delay(DISPATCH_REDIS_CONNECT_TIMEOUT_MS).then(() => {
+        throw new Error(`Redis connection timed out after ${DISPATCH_REDIS_CONNECT_TIMEOUT_MS}ms`);
+      })
+    ]);
     redisReady = true;
     console.log(`Redis dispatch index ready: ${REDIS_URL}`);
     return true;
   } catch (error) {
     redisReady = false;
+    try {
+      await redisClient.disconnect();
+    } catch (disconnectError) {
+      // Ignore cleanup errors when Redis was never fully connected.
+    }
     redisClient = null;
     console.warn(`Redis dispatch index unavailable, using database fallback: ${error.message}`);
     return false;
@@ -1172,8 +1216,8 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = DISPATCH_ROUTE_TI
   }
 }
 
-async function computeRouteEstimate(taskCoords, volunteerCoords) {
-  if (!ROUTING_ENGINE_URL) {
+async function computeRouteEstimate(taskCoords, volunteerCoords, options = {}) {
+  if (!options.allowRemote || !DISPATCH_REMOTE_ROUTING || !ROUTING_ENGINE_URL) {
     return routingFallback(taskCoords, volunteerCoords);
   }
 
@@ -1411,41 +1455,71 @@ async function rankCandidatesForTask(task, options = {}) {
   const radiusMeters = Number(options.radiusMeters || DISPATCH_DEFAULT_RADIUS_METERS);
   const excludedVolunteerIds = options.excludeVolunteerIds || [];
   const candidates = await findAvailableVolunteersNear(taskCoords, radiusMeters, excludedVolunteerIds);
-  const ranked = [];
-
-  for (const volunteer of candidates) {
+  const fallbackRanked = candidates.map((volunteer) => {
     const volunteerCoords = pointToCoordinates(volunteer.location);
-    const route = await computeRouteEstimate(taskCoords, volunteerCoords);
+    const route = routingFallback(taskCoords, volunteerCoords);
     const details = dispatchScore({ task, volunteer, route });
-    ranked.push({ volunteer, ...details });
+    return { volunteer, volunteerCoords, ...details };
+  }).sort((left, right) => right.score - left.score);
+
+  if (!DISPATCH_REMOTE_ROUTING || !ROUTING_ENGINE_URL) {
+    return fallbackRanked;
   }
 
-  return ranked.sort((left, right) => right.score - left.score);
+  const refined = await Promise.all(
+    fallbackRanked.slice(0, DISPATCH_MAX_ROUTE_CANDIDATES).map(async (candidate) => {
+      const route = await computeRouteEstimate(taskCoords, candidate.volunteerCoords, {
+        allowRemote: true
+      });
+      const details = dispatchScore({ task, volunteer: candidate.volunteer, route });
+      return { volunteer: candidate.volunteer, volunteerCoords: candidate.volunteerCoords, ...details };
+    })
+  );
+
+  return [
+    ...refined,
+    ...fallbackRanked.slice(DISPATCH_MAX_ROUTE_CANDIDATES)
+  ].sort((left, right) => right.score - left.score);
 }
 
 async function rankTasksForVolunteer(volunteer, options = {}) {
   const volunteerCoords = pointToCoordinates(volunteer.location);
   const radiusMeters = Number(options.radiusMeters || DISPATCH_DEFAULT_RADIUS_METERS);
   const tasks = await findOpenTasksNear(volunteerCoords, radiusMeters);
-  const ranked = [];
-
-  for (const task of tasks) {
+  const fallbackRanked = tasks.map((task) => {
     const skillMatchLevel = scoreSkillMatch(task.requiredSkills, volunteer);
     const languageMatchLevel = scoreLanguageMatch(
       normalizeArray(task.preferredLanguages).length ? task.preferredLanguages : preferredLanguagesForTask(task),
       volunteer
     );
     if (options.requireFilter !== false && skillMatchLevel <= 0 && languageMatchLevel <= 0) {
-      continue;
+      return null;
     }
 
     const taskCoords = pointToCoordinates(task.location);
-    const route = await computeRouteEstimate(taskCoords, volunteerCoords);
+    const route = routingFallback(taskCoords, volunteerCoords);
     const details = dispatchScore({ task, volunteer, route });
-    ranked.push({ task, ...details });
+    return { task, taskCoords, ...details };
+  }).filter(Boolean).sort((left, right) => right.score - left.score);
+
+  if (!DISPATCH_REMOTE_ROUTING || !ROUTING_ENGINE_URL) {
+    return fallbackRanked;
   }
 
-  return ranked.sort((left, right) => right.score - left.score);
+  const refined = await Promise.all(
+    fallbackRanked.slice(0, DISPATCH_MAX_ROUTE_CANDIDATES).map(async (candidate) => {
+      const route = await computeRouteEstimate(candidate.taskCoords, volunteerCoords, {
+        allowRemote: true
+      });
+      const details = dispatchScore({ task: candidate.task, volunteer, route });
+      return { task: candidate.task, taskCoords: candidate.taskCoords, ...details };
+    })
+  );
+
+  return [
+    ...refined,
+    ...fallbackRanked.slice(DISPATCH_MAX_ROUTE_CANDIDATES)
+  ].sort((left, right) => right.score - left.score);
 }
 
 function sendVolunteerNotification(volunteerId, payload) {
@@ -1878,13 +1952,20 @@ function buildToken(user) {
 }
 
 function parseAuthorizationToken(request) {
+  let token = null;
   const authHeader = request.headers.authorization || "";
-  if (!authHeader.startsWith("Bearer ")) {
+  if (authHeader.startsWith("Bearer ")) {
+    token = authHeader.slice(7);
+  } else if (request.query && request.query.token) {
+    token = request.query.token;
+  }
+
+  if (!token) {
     return null;
   }
 
   try {
-    return jwt.verify(authHeader.slice(7), JWT_SECRET);
+    return jwt.verify(token, JWT_SECRET);
   } catch (error) {
     return null;
   }
@@ -2392,6 +2473,9 @@ function computeMatchScore(task, volunteer, teammates = []) {
     normalizedDistance * 0.7 -
     medicalPenalty -
     safetyPenalty;
+  const reporterTrustScore = Number(task.ngo?.trustScore ?? task.ngo?.trust_score ?? 0.5);
+  const lowTrustPenalty = reporterTrustScore < LOW_TRUST_THRESHOLD ? 8.0 : 0;
+  const finalScore = totalScore - lowTrustPenalty;
   const reasons = uniqueValues([
     overlapCount ? `${overlapCount} required skills aligned` : "",
     languageOverlap ? `${languageOverlap} language matches` : "",
@@ -2416,7 +2500,7 @@ function computeMatchScore(task, volunteer, teammates = []) {
     timeWindowOverlap,
     medicalReadiness,
     distanceKm,
-    score: Number(totalScore.toFixed(2)),
+    score: Number(finalScore.toFixed(2)),
     reasons,
     verification
   };
@@ -2492,6 +2576,16 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: 0,
       field: "reports_confirmed"
+    },
+    points: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0
+    },
+    badges: {
+      type: DataTypes.ARRAY(DataTypes.TEXT),
+      allowNull: false,
+      defaultValue: []
     }
   },
   {
@@ -3113,6 +3207,89 @@ const IntakeSession = sequelize.define(
   }
 );
 
+const SOSAlert = sequelize.define(
+  "SOSAlert",
+  {
+    id: {
+      type: DataTypes.STRING,
+      primaryKey: true
+    },
+    volunteerId: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      field: "volunteer_id"
+    },
+    volunteerName: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "Unknown",
+      field: "volunteer_name"
+    },
+    latitude: {
+      type: DataTypes.DOUBLE,
+      allowNull: true
+    },
+    longitude: {
+      type: DataTypes.DOUBLE,
+      allowNull: true
+    },
+    status: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "active"
+    },
+    resolvedAt: {
+      type: DataTypes.DATE,
+      allowNull: true,
+      field: "resolved_at"
+    }
+  },
+  {
+    tableName: "sos_alerts",
+    createdAt: "created_at",
+    updatedAt: false
+  }
+);
+
+const TaskFeedback = sequelize.define(
+  "TaskFeedback",
+  {
+    id: {
+      type: DataTypes.STRING,
+      primaryKey: true
+    },
+    taskId: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      field: "task_id"
+    },
+    volunteerId: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      field: "volunteer_id"
+    },
+    rating: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 3
+    },
+    verified: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true
+    },
+    comments: {
+      type: DataTypes.TEXT,
+      allowNull: true
+    }
+  },
+  {
+    tableName: "task_feedback",
+    createdAt: "created_at",
+    updatedAt: false
+  }
+);
+
 User.hasOne(Volunteer, { foreignKey: "user_id", as: "volunteerProfile" });
 Volunteer.belongsTo(User, { foreignKey: "user_id", as: "user" });
 
@@ -3155,11 +3332,20 @@ Company.hasMany(CSRReport, { foreignKey: "company_id", as: "reports" });
 Review.belongsTo(Task, { foreignKey: "task_id", as: "task" });
 Task.hasMany(Review, { foreignKey: "task_id", as: "reviews" });
 
-async function ensureDatabase() {
+SOSAlert.belongsTo(Volunteer, { foreignKey: "volunteer_id", as: "volunteer" });
+Volunteer.hasMany(SOSAlert, { foreignKey: "volunteer_id", as: "sosAlerts" });
+
+TaskFeedback.belongsTo(Task, { foreignKey: "task_id", as: "task" });
+Task.hasMany(TaskFeedback, { foreignKey: "task_id", as: "feedback" });
+
+TaskFeedback.belongsTo(Volunteer, { foreignKey: "volunteer_id", as: "volunteer" });
+Volunteer.hasMany(TaskFeedback, { foreignKey: "volunteer_id", as: "feedback" });
+
+async function waitForDatabaseConnection() {
   for (let attempt = 1; attempt <= DB_CONNECTION_RETRY_ATTEMPTS; attempt += 1) {
     try {
       await sequelize.authenticate();
-      break;
+      return;
     } catch (error) {
       if (!shouldRetryDatabaseConnection(error) || attempt === DB_CONNECTION_RETRY_ATTEMPTS) {
         throw error;
@@ -3171,6 +3357,10 @@ async function ensureDatabase() {
       await delay(DB_CONNECTION_RETRY_DELAY_MS);
     }
   }
+}
+
+async function ensureDatabase() {
+  await waitForDatabaseConnection();
 
   if (USE_POSTGIS) {
     await sequelize.query("CREATE EXTENSION IF NOT EXISTS postgis;");
@@ -3250,7 +3440,7 @@ async function ensureDatabase() {
     END $$;
   `);
   await sequelize.query(
-    "ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('open', 'in_progress', 'completed', 'resolved', 'pending_review', 'pending', 'confirmed', 'rejected', 'auto_accepted')) NOT VALID;"
+    "ALTER TABLE tasks ADD CONSTRAINT tasks_status_check CHECK (status IN ('open', 'in_progress', 'completed', 'resolved', 'pending_review', 'pending_vetting', 'pending', 'confirmed', 'rejected', 'auto_accepted')) NOT VALID;"
   ).catch((error) => {
     if (!/already exists/i.test(error.message)) {
       throw error;
@@ -3322,6 +3512,35 @@ async function ensureDatabase() {
     await sequelize.query("CREATE INDEX IF NOT EXISTS volunteers_location_idx ON volunteers USING GIST (location);");
     await sequelize.query("CREATE INDEX IF NOT EXISTS tasks_location_idx ON tasks USING GIST (location);");
   }
+  await sequelize.query(
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS points INT NOT NULL DEFAULT 0;"
+  );
+  await sequelize.query(
+    "ALTER TABLE users ADD COLUMN IF NOT EXISTS badges TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];"
+  );
+  await sequelize.query(`
+    CREATE TABLE IF NOT EXISTS sos_alerts (
+      id VARCHAR PRIMARY KEY,
+      volunteer_id VARCHAR REFERENCES users(id) ON DELETE CASCADE,
+      volunteer_name VARCHAR NOT NULL DEFAULT 'Unknown',
+      latitude DOUBLE PRECISION,
+      longitude DOUBLE PRECISION,
+      status VARCHAR NOT NULL DEFAULT 'active',
+      resolved_at TIMESTAMP WITH TIME ZONE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+  `);
+  await sequelize.query(`
+    CREATE TABLE IF NOT EXISTS task_feedback (
+      id VARCHAR PRIMARY KEY,
+      task_id VARCHAR REFERENCES tasks(id) ON DELETE CASCADE,
+      volunteer_id VARCHAR REFERENCES users(id) ON DELETE CASCADE,
+      rating INT NOT NULL DEFAULT 3,
+      verified BOOLEAN NOT NULL DEFAULT TRUE,
+      comments TEXT,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+    );
+  `);
 }
 
 async function ensureDirectories() {
@@ -3586,7 +3805,10 @@ function serializeUser(user, options = {}) {
     baseLocation: profile?.baseLocation || "",
     latitude: coordinates.lat,
     longitude: coordinates.lng,
-    verification
+    verification,
+    points: user.points || 0,
+    badges: user.badges || [],
+    trustScore: Number(user.trustScore || 0).toFixed(2)
   };
 
   if (options.includePrivate) {
@@ -3668,7 +3890,8 @@ async function ensureVolunteerProfileForUser(userId, payload = {}) {
   });
 }
 
-async function buildTaskPayload(task, currentUser = null) {
+async function buildTaskPayload(task, currentUser = null, options = {}) {
+  const { cachedVolunteerProfiles = null } = options;
   const taskWithRelations =
     task.assignments && task.ngo
       ? task
@@ -3717,7 +3940,7 @@ async function buildTaskPayload(task, currentUser = null) {
     );
 
   const assignedVolunteerIds = new Set((taskWithRelations.assignments || []).map((assignment) => assignment.volunteerId));
-  const volunteerProfiles = await Volunteer.findAll({
+  const volunteerProfiles = cachedVolunteerProfiles || await Volunteer.findAll({
     include: [{ model: User, as: "user" }],
     where: {},
     order: [["id", "ASC"]]
@@ -3871,7 +4094,12 @@ async function createTaskRecord({
     peopleServed,
     location: pointFromCoordinates(latitude, longitude),
     isAssigned: false,
-    status: normalizeTaskStatus(status, TASK_STATUS.OPEN),
+    status: normalizeTaskStatus(
+      isHighImpactTask({ severity, peopleServed, description }) && status === TASK_STATUS.OPEN
+        ? TASK_STATUS.PENDING_VETTING
+        : status,
+      TASK_STATUS.OPEN
+    ),
     rejectedAt: null,
     confirmationCount,
     gpsLat,
@@ -3880,6 +4108,25 @@ async function createTaskRecord({
     mediaUrl,
     contentHash
   }, { transaction });
+}
+
+const BADGE_DEFINITIONS = [
+  { id: "first_responder", label: "First Responder", check: (user) => Number(user.reportsConfirmed || 0) >= 1 },
+  { id: "pathfinder", label: "Pathfinder", check: (user) => Number(user.points || 0) >= 50 },
+  { id: "guardian", label: "Guardian", check: (user) => Number(user.trustScore || user.trust_score || 0) >= 0.9 },
+  { id: "elite_rescuer", label: "Elite Rescuer", check: (user) => Number(user.points || 0) >= 300 }
+];
+
+async function awardPointsAndBadges(user, pointsToAdd, transaction = null) {
+  const newPoints = Number(user.points || 0) + pointsToAdd;
+  const currentBadges = normalizeArray(user.badges);
+  const updatedUser = { ...user.get ? user.get({ plain: true }) : user, points: newPoints };
+  const earnedBadges = BADGE_DEFINITIONS
+    .filter((badge) => badge.check(updatedUser) && !currentBadges.includes(badge.label))
+    .map((badge) => badge.label);
+  const newBadges = [...currentBadges, ...earnedBadges];
+  await user.update({ points: newPoints, badges: newBadges }, { transaction });
+  return { points: newPoints, badges: newBadges, newBadges: earnedBadges };
 }
 
 async function createDispatchTaskFromRequest(body = {}, reporter) {
@@ -4007,12 +4254,16 @@ async function findNearbyTaskForVerification({ category, gpsLat, gpsLng, transac
 }
 
 async function refreshVerificationStatus(taskId, reporter, transaction) {
-  const task = await Task.findByPk(taskId, { transaction });
+  const task = await Task.findByPk(taskId, {
+    include: [{ model: User, as: "ngo" }],
+    transaction
+  });
   if (!task) {
     return null;
   }
 
-  const nextStatus = evaluateTaskStatus(task.get({ plain: true }), reporter.get({ plain: true }));
+  const reporterToUse = task.ngo ? task.ngo : reporter;
+  const nextStatus = evaluateTaskStatus(task.get({ plain: true }), reporterToUse.get({ plain: true }));
   await task.update({ status: nextStatus, updatedAt: new Date() }, { transaction });
   return Task.findByPk(taskId, {
     include: [{ model: User, as: "ngo" }],
@@ -4374,15 +4625,21 @@ async function buildAdminSummary() {
   const overview = await buildOverview();
   const alerts = await buildAlerts();
   const openTasks = await loadOpenTasksWithRelations();
+  const activeSosAlerts = await SOSAlert.findAll({ where: { status: "active" }, order: [["created_at", "DESC"]] });
+  const vettingCount = await Task.count({ where: { status: TASK_STATUS.PENDING_VETTING } });
 
   return {
     metrics: [
       { label: "Open needs", value: overview.openNeeds },
       { label: "Review queue", value: (await Review.count({ where: { status: "pending" } })).toString() },
       { label: "Alerts raised", value: alerts.length.toString() },
-      { label: "Volunteer coverage", value: overview.volunteerReadiness }
+      { label: "Volunteer coverage", value: overview.volunteerReadiness },
+      { label: "Active SOS", value: activeSosAlerts.length.toString() },
+      { label: "Pending vetting", value: vettingCount.toString() }
     ],
     alerts,
+    sosAlerts: activeSosAlerts,
+    vettingCount,
     openTasks: await Promise.all(openTasks.slice(0, 6).map((task) => buildTaskPayload(task)))
   };
 }
@@ -5890,7 +6147,20 @@ async function attachDispatchWebSocketServer(httpServer) {
       return;
     }
 
-    const user = await authenticateWebSocket(request);
+    if (!appState.databaseReady) {
+      socket.write("HTTP/1.1 503 Service Unavailable\r\n\r\n");
+      socket.destroy();
+      return;
+    }
+
+    let user = null;
+    try {
+      user = await authenticateWebSocket(request);
+    } catch (error) {
+      socket.write("HTTP/1.1 503 Service Unavailable\r\n\r\n");
+      socket.destroy();
+      return;
+    }
     if (!user) {
       socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
       socket.destroy();
@@ -5898,9 +6168,13 @@ async function attachDispatchWebSocketServer(httpServer) {
     }
 
     webSocketServer.handleUpgrade(request, socket, head, async (ws) => {
-      const volunteer =
-        user.role === "volunteer" ? await ensureVolunteerProfileForUser(user.id) : user.volunteerProfile || null;
-      webSocketServer.emit("connection", ws, request, user, volunteer);
+      try {
+        const volunteer =
+          user.role === "volunteer" ? await ensureVolunteerProfileForUser(user.id) : user.volunteerProfile || null;
+        webSocketServer.emit("connection", ws, request, user, volunteer);
+      } catch (error) {
+        ws.close(1011, "Dispatch socket initialization failed.");
+      }
     });
   });
 
@@ -5963,9 +6237,25 @@ function requireRole(roles) {
   };
 }
 
+function isDatabaseBackedRequest(request) {
+  const pathname = request.path || "";
+  return (
+    pathname.startsWith("/api/") ||
+    pathname === "/tasks" ||
+    pathname.startsWith("/tasks/") ||
+    pathname === "/volunteers" ||
+    pathname.startsWith("/volunteers/") ||
+    pathname === "/dispatch" ||
+    pathname.startsWith("/dispatch/")
+  );
+}
+
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
+app.get("/favicon.ico", (request, response) => {
+  response.status(204).end();
+});
 app.use("/generated-reports", express.static(REPORTS_DIR));
 app.use("/uploads", express.static(UPLOAD_DIR));
 app.use(express.static(FRONTEND_DIR));
@@ -5973,6 +6263,20 @@ app.use(express.static(FRONTEND_DIR));
 ROLE_PAGE_FILES.forEach((pageFile) => {
   app.get(`/${pageFile}`, (request, response) => {
     response.sendFile(path.join(ROOT_DIR, pageFile));
+  });
+});
+
+app.use((request, response, next) => {
+  if (request.path === "/api/health" || !isDatabaseBackedRequest(request) || appState.databaseReady) {
+    next();
+    return;
+  }
+
+  response.status(503).json({
+    error: "Backend data services are still starting. Please retry shortly.",
+    ready: false,
+    startedAt: appState.initializationStartedAt,
+    startupError: appState.startupError ? appState.startupError.message : null
   });
 });
 
@@ -6087,12 +6391,40 @@ app.post("/api/login", async (request, response, next) => {
 });
 
 app.get("/api/health", async (request, response, next) => {
+  if (!appState.databaseReady) {
+    response.status(appState.startupError ? 500 : 503).json({
+      ok: false,
+      ready: false,
+      initializing: !appState.startupError,
+      startedAt: appState.initializationStartedAt,
+      completedAt: appState.initializationCompletedAt,
+      error: appState.startupError ? appState.startupError.message : null
+    });
+    return;
+  }
+
+  if (!appState.schemaReady) {
+    response.json({
+      ok: true,
+      ready: true,
+      schemaReady: false,
+      schemaMaintenanceRunning: appState.schemaMaintenanceRunning,
+      startedAt: appState.initializationStartedAt,
+      completedAt: appState.initializationCompletedAt,
+      redisReady
+    });
+    return;
+  }
+
   try {
     response.json({
       ok: true,
+      ready: true,
+      schemaReady: true,
       users: await User.count(),
       tasks: await Task.count(),
-      companies: await Company.count()
+      companies: await Company.count(),
+      redisReady
     });
   } catch (error) {
     next(error);
@@ -6346,7 +6678,12 @@ app.get("/api/issues", requireAuth, async (request, response, next) => {
 app.get("/api/tasks", requireAuth, async (request, response, next) => {
   try {
     const tasks = await loadOpenTasksWithRelations();
-    const payloads = await Promise.all(tasks.map((task) => buildTaskPayload(task, request.user)));
+    const cachedVolunteerProfiles = await Volunteer.findAll({
+      include: [{ model: User, as: "user" }],
+      where: {},
+      order: [["id", "ASC"]]
+    });
+    const payloads = await Promise.all(tasks.map((task) => buildTaskPayload(task, request.user, { cachedVolunteerProfiles })));
     const rankedTasks =
       request.user.role === "volunteer"
         ? [...payloads].sort((left, right) => {
@@ -6450,6 +6787,10 @@ app.post(["/api/tasks/:id/confirm", "/tasks/:id/confirm"], requireAuth, async (r
         transaction,
         conflictIsError: true
       });
+      const refreshedUser = await User.findByPk(request.user.id, { transaction });
+      if (refreshedUser) {
+        await awardPointsAndBadges(refreshedUser, 10, transaction);
+      }
       return refreshVerificationStatus(request.params.id, request.user, transaction);
     });
 
@@ -7842,6 +8183,226 @@ app.post("/api/ngos", requireAuth, requireRole(["corporate", "admin"]), async (r
   }
 });
 
+// ────────────────────────────────────────────────────────────
+// Safety: SOS Alerts
+// ────────────────────────────────────────────────────────────
+app.post("/api/volunteers/sos", requireAuth, requireRole(["volunteer"]), async (request, response, next) => {
+  try {
+    const latitude = Number(request.body.latitude || 0) || null;
+    const longitude = Number(request.body.longitude || 0) || null;
+
+    const volunteer = await Volunteer.findOne({ where: { userId: request.user.id } });
+    if (!volunteer) {
+      response.status(404).json({ error: "Volunteer profile not found." });
+      return;
+    }
+
+    const alert = await SOSAlert.create({
+      id: createId("sos"),
+      volunteerId: request.user.id,
+      volunteerName: request.user.name || "Unknown",
+      latitude,
+      longitude,
+      status: "active"
+    });
+
+    await awardPointsAndBadges(request.user, 5);
+
+    response.status(201).json({ alert, message: "SOS alert sent. Coordinators have been notified." });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/sos/:id/resolve", requireAuth, requireRole(["admin", "ngo"]), async (request, response, next) => {
+  try {
+    const alert = await SOSAlert.findByPk(request.params.id);
+    if (!alert) {
+      response.status(404).json({ error: "SOS alert not found." });
+      return;
+    }
+
+    if (alert.status !== "active") {
+      response.status(400).json({ error: "This alert has already been resolved." });
+      return;
+    }
+
+    await alert.update({ status: "resolved", resolvedAt: new Date() });
+
+    response.json({ alert, message: "SOS alert resolved." });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/sos/active", requireAuth, requireRole(["admin", "ngo"]), async (request, response, next) => {
+  try {
+    const alerts = await SOSAlert.findAll({
+      where: { status: "active" },
+      order: [["created_at", "DESC"]]
+    });
+    response.json({ alerts });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// Safety: Task Feedback / Verification
+// ────────────────────────────────────────────────────────────
+app.post("/api/tasks/:id/feedback", requireAuth, requireRole(["volunteer", "admin", "ngo"]), async (request, response, next) => {
+  try {
+    const task = await Task.findByPk(request.params.id, {
+      include: [{ model: User, as: "ngo" }]
+    });
+    if (!task) {
+      response.status(404).json({ error: "Task not found." });
+      return;
+    }
+
+    const rating = Math.max(1, Math.min(5, Number(request.body.rating || 3)));
+    const verified = request.body.verified !== false;
+    const comments = String(request.body.comments || "").trim();
+
+    const volunteer = await Volunteer.findOne({ where: { userId: request.user.id } });
+
+    const feedback = await sequelize.transaction(async (transaction) => {
+      const created = await TaskFeedback.create({
+        id: createId("feedback"),
+        taskId: task.id,
+        volunteerId: request.user.id,
+        rating,
+        verified,
+        comments
+      }, { transaction });
+
+      // Mark task completed
+      await task.update({
+        status: TASK_STATUS.COMPLETED,
+        completedAt: new Date()
+      }, { transaction });
+
+      // Update volunteer availability
+      if (volunteer) {
+        await volunteer.update({ isAvailable: true }, { transaction });
+      }
+
+      // Update trust scores for reporters
+      const reporterUser = task.ngo;
+      if (reporterUser) {
+        const queryable = {
+          query(sql, params) {
+            return sequelize.query(sql, {
+              bind: params,
+              transaction,
+              type: Sequelize.QueryTypes.SELECT
+            }).then((rows) => ({ rows }));
+          }
+        };
+        await updateTrustScore(reporterUser.id, verified, queryable);
+      }
+
+      // Award gamification points to the volunteer
+      const refreshedUser = await User.findByPk(request.user.id, { transaction });
+      if (refreshedUser) {
+        await awardPointsAndBadges(refreshedUser, verified ? 50 : 10, transaction);
+      }
+
+      return created;
+    });
+
+    response.json({ feedback, message: "Thank you for your feedback." });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// Gamification: Leaderboard
+// ────────────────────────────────────────────────────────────
+app.get("/api/leaderboard", requireAuth, async (request, response, next) => {
+  try {
+    const users = await User.findAll({
+      where: { points: { [Op.gt]: 0 } },
+      order: [["points", "DESC"]],
+      limit: 25
+    });
+
+    response.json({
+      leaderboard: users.map((user, index) => ({
+        rank: index + 1,
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        roleLabel: ROLE_LABELS[user.role] || titleCase(user.role),
+        points: user.points,
+        badges: user.badges || [],
+        trustScore: Number(user.trustScore || 0).toFixed(2)
+      }))
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// Manual Vetting: Coordinator Queue
+// ────────────────────────────────────────────────────────────
+app.get("/api/coordinators/vetting-queue", requireAuth, requireRole(["admin", "ngo"]), async (request, response, next) => {
+  try {
+    const tasks = await Task.findAll({
+      where: { status: TASK_STATUS.PENDING_VETTING },
+      include: [{ model: User, as: "ngo" }],
+      order: [sequelize.literal('"Task"."updated_at" DESC')]
+    });
+
+    response.json({
+      items: tasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        severity: task.severity,
+        locationName: task.locationName,
+        peopleServed: task.peopleServed,
+        type: task.type,
+        reporter: task.ngo?.name || "Unknown",
+        createdAt: readTimestamp(task, "createdAt")
+      }))
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/tasks/:id/vet", requireAuth, requireRole(["admin", "ngo"]), async (request, response, next) => {
+  try {
+    const task = await Task.findByPk(request.params.id);
+    if (!task) {
+      response.status(404).json({ error: "Task not found." });
+      return;
+    }
+
+    if (task.status !== TASK_STATUS.PENDING_VETTING) {
+      response.status(400).json({ error: "This task is not awaiting vetting." });
+      return;
+    }
+
+    const approved = request.body.approved !== false;
+    await task.update({
+      status: approved ? TASK_STATUS.OPEN : TASK_STATUS.REJECTED,
+      rejectedAt: approved ? null : new Date(),
+      updatedAt: new Date()
+    });
+
+    response.json({
+      task: { id: task.id, title: task.title, status: task.status },
+      message: approved ? "Task approved and now visible to volunteers." : "Task rejected."
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.use((error, request, response, next) => {
   console.error(error);
   response.status(error.statusCode || 500).json({
@@ -7850,30 +8411,104 @@ app.use((error, request, response, next) => {
 });
 
 async function initializeApp() {
+  appState.initializationStartedAt = new Date().toISOString();
+  appState.initializationCompletedAt = null;
+  appState.startupError = null;
   await ensureDirectories();
-  await ensureDatabase();
-  await seedDatabase();
-  await connectRedis();
-  await rebuildSpatialIndex();
-  await rebuildRedisDispatchIndex();
+  await waitForDatabaseConnection();
+  appState.databaseReady = true;
+  appState.initializationCompletedAt = new Date().toISOString();
+  console.log(`Database connection ready: ${DISPLAY_DATABASE_URL}`);
+
+  runSchemaMaintenance();
 }
 
-initializeApp()
-  .then(async () => {
-    const httpServer = http.createServer(app);
-    await attachDispatchWebSocketServer(httpServer);
-    httpServer.listen(port, "0.0.0.0", () => {
-      console.log(`Server is running on port ${port}`);
-      console.log(`Database connection ready: ${DISPLAY_DATABASE_URL}`);
-      console.log(`Dispatch WebSocket ready at ${DISPATCH_WS_PATH}`);
-    });
-  })
-  .catch((error) => {
-    console.error("Application startup failed:", error);
-    if (error?.name?.includes("Sequelize")) {
+async function runSchemaMaintenance() {
+  if (appState.schemaMaintenanceRunning) {
+    return;
+  }
+
+  appState.schemaMaintenanceRunning = true;
+  try {
+    await ensureDatabase();
+    await seedDatabase();
+    appState.schemaReady = true;
+    warmDispatchInfrastructure();
+  } catch (error) {
+    appState.startupError = error;
+    console.error("Database schema maintenance failed:", error);
+  } finally {
+    appState.schemaMaintenanceRunning = false;
+  }
+}
+
+async function warmDispatchInfrastructure() {
+  try {
+    await rebuildSpatialIndex();
+  } catch (error) {
+    console.warn(`In-memory dispatch index warmup skipped: ${error.message}`);
+  }
+
+  const redisConnected = await connectRedis();
+  if (!redisConnected) {
+    return;
+  }
+
+  try {
+    await rebuildRedisDispatchIndex();
+  } catch (error) {
+    console.warn(`Redis dispatch index warmup skipped: ${error.message}`);
+  }
+}
+
+const httpServer = http.createServer(app);
+
+function startHttpServer({ dispatchWebSocketReady = false } = {}) {
+  httpServer.once("error", (error) => {
+    if (error.code === "EADDRINUSE") {
       console.error(
-        `Check that PostgreSQL with PostGIS is running and the service has DATABASE_URL or PGHOST/PGDATABASE/PGUSER/PGPASSWORD configured. Effective database target: ${DISPLAY_DATABASE_URL}`
+        `Port ${port} is already in use. Stop the existing server or start this app with a different PORT.`
       );
+      process.exit(1);
     }
+
+    if (error.code === "EPERM") {
+      console.error(
+        `Unable to bind ${host}:${port}. Try setting HOST=127.0.0.1 for local development or choose a different PORT.`
+      );
+      process.exit(1);
+    }
+
+    console.error("HTTP server startup failed:", error);
     process.exit(1);
   });
+
+  httpServer.listen(port, host, () => {
+    console.log(`Server is running at http://${host}:${port}`);
+    console.log(`Data services initializing in background.`);
+    if (dispatchWebSocketReady) {
+      console.log(`Dispatch WebSocket ready at ${DISPATCH_WS_PATH}`);
+    }
+  });
+}
+
+attachDispatchWebSocketServer(httpServer)
+  .then(() => {
+    startHttpServer({ dispatchWebSocketReady: true });
+  })
+  .catch((error) => {
+    console.error("Dispatch WebSocket startup failed:", error);
+    startHttpServer();
+  });
+
+initializeApp().catch((error) => {
+  appState.databaseReady = false;
+  appState.startupError = error;
+  appState.initializationCompletedAt = new Date().toISOString();
+  console.error("Application startup failed:", error);
+  if (error?.name?.includes("Sequelize")) {
+    console.error(
+      `Check that PostgreSQL is running and the service has DATABASE_URL or PGHOST/PGDATABASE/PGUSER/PGPASSWORD configured. Effective database target: ${DISPLAY_DATABASE_URL}`
+    );
+  }
+});

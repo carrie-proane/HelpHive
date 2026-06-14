@@ -65,6 +65,7 @@
                   <a class="cta-button" href="#intelTaskSection">Go to live tasks</a>
                   <a class="ghost-button" href="./profile.html">Update profile fit</a>
                 </div>
+                <div id="gamificationCard"></div>
               </div>
               <div class="page-hero-visual">
                 <article class="visual-card blue">
@@ -92,6 +93,19 @@
                 visible here for the current volunteer response flow.
               </p>
             </div>
+            
+            <div class="dispatch-toggle-container">
+              <label class="dispatch-toggle-label">
+                <span class="dispatch-toggle-text">Auto-Assign Mode</span>
+                <div class="dispatch-switch">
+                  <input type="checkbox" id="dispatchModeToggle" checked>
+                  <span class="dispatch-slider"></span>
+                </div>
+              </label>
+              <p class="dispatch-toggle-hint" id="dispatchModeHint">
+                You will be automatically assigned nearby urgent tasks via push alerts.
+              </p>
+            </div>
 
             <div class="task-feed-shell">
               <div class="task-stack task-feed" id="intelTaskList">
@@ -115,6 +129,13 @@
       <article class="task-detail-panel">
         <button class="task-detail-close" type="button" aria-label="Close task details" data-close-task-modal>×</button>
         <div id="taskDetailContent"></div>
+      </article>
+    </div>
+
+    <div id="autoAssignModal" class="task-detail-modal hidden" role="dialog" aria-modal="true" aria-labelledby="autoAssignTitle">
+      <div class="task-detail-backdrop"></div>
+      <article class="task-detail-panel auto-assign-panel">
+        <div id="autoAssignContent"></div>
       </article>
     </div>
 

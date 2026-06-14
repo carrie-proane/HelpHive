@@ -143,7 +143,7 @@ function forwardExit(code) {
 
 function startApp() {
   appProcess = spawn("node", ["server.js"], {
-    cwd: repoRoot,
+    cwd: path.join(repoRoot, "backend"),
     stdio: "inherit",
     env: {
       ...process.env,

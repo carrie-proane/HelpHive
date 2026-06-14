@@ -3,7 +3,8 @@ const test = require("node:test");
 
 const {
   evaluateTaskStatus,
-  updateTrustScore
+  updateTrustScore,
+  LOW_TRUST_THRESHOLD
 } = require("../services/trustService");
 
 test("evaluateTaskStatus keeps a new reporter with no history pending", () => {
@@ -25,6 +26,28 @@ test("evaluateTaskStatus confirms after two independent confirmations", () => {
     evaluateTaskStatus({ confirmation_count: 2 }, { trust_score: 0.5 }),
     "confirmed"
   );
+});
+
+test("evaluateTaskStatus requires 4 confirmations for low-trust reporter", () => {
+  assert.equal(
+    evaluateTaskStatus({ confirmation_count: 2 }, { trust_score: 0.3 }),
+    "pending",
+    "2 confirmations should NOT be enough for a reporter with trust < 0.4"
+  );
+  assert.equal(
+    evaluateTaskStatus({ confirmation_count: 3 }, { trust_score: 0.3 }),
+    "pending",
+    "3 confirmations should NOT be enough for a reporter with trust < 0.4"
+  );
+  assert.equal(
+    evaluateTaskStatus({ confirmation_count: 4 }, { trust_score: 0.3 }),
+    "confirmed",
+    "4 confirmations should confirm for a low-trust reporter"
+  );
+});
+
+test("LOW_TRUST_THRESHOLD is exported and equals 0.4", () => {
+  assert.equal(LOW_TRUST_THRESHOLD, 0.4);
 });
 
 test("updateTrustScore applies Laplace smoothing for a rejected report", async () => {

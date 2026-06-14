@@ -100,6 +100,10 @@ const demoLocationsByCity = {
   }
 };
 let currentLocation = { ...DEFAULT_DEMO_LOCATION };
+let dispatchMode = "auto_assign";
+let dispatchEventSource = null;
+let locationWatchId = null;
+let currentVolunteerLocation = null;
 const cityContent = {
   Pune: {
     cityName: "Pune",
@@ -1611,9 +1615,15 @@ function taskActionButtons(task, currentUser, options = {}) {
   const actions = [];
 
   if (canVolunteer && !isAssigned && task.status !== "completed") {
-    actions.push(
-      `<button class="cta-button" type="button" data-task-action="volunteer" data-task-id="${escapeHtml(task.id)}">Volunteer</button>`
-    );
+    if (dispatchMode === "volunteer_choice") {
+      actions.push(
+        `<button class="cta-button" type="button" data-task-action="accept" data-task-id="${escapeHtml(task.id)}">Accept</button>`
+      );
+    } else {
+      actions.push(
+        `<button class="cta-button" type="button" data-task-action="volunteer" data-task-id="${escapeHtml(task.id)}">Volunteer</button>`
+      );
+    }
   }
 
   if (canComplete && task.status !== "completed") {
@@ -1756,6 +1766,20 @@ function renderTaskCard(task, currentUser) {
   const severityLabel =
     taskSeverityConfig.find((item) => item.key === severity)?.label || capitalize(severity);
 
+  let matchMeta = "";
+  if (task.match) {
+    const timeDisplay = typeof task.match.routeTimeSeconds === 'number' 
+      ? Math.round(task.match.routeTimeSeconds / 60) + ' min ETA'
+      : '';
+    const distDisplay = typeof task.match.routeDistanceMeters === 'number'
+      ? (task.match.routeDistanceMeters / 1000).toFixed(1) + ' km away'
+      : '';
+    const matchText = timeDisplay || distDisplay;
+    if (matchText) {
+      matchMeta = `<span class="task-card-meta-pill eta-pill">${escapeHtml(matchText)}</span>`;
+    }
+  }
+
   return `
     <article
       class="task-card compact ${escapeHtml(severity)}"
@@ -1770,6 +1794,7 @@ function renderTaskCard(task, currentUser) {
         <span class="task-card-meta-pill">${escapeHtml(withFallback(task.locationName, "Not specified"))}</span>
         <span class="task-card-meta-pill">${escapeHtml(assignedLabel)}</span>
         <span class="task-card-meta-pill">${escapeHtml(prettyLabel(withFallback(task.category || task.type, "Not specified")))}</span>
+        ${matchMeta}
       </div>
       <div class="task-card-actions">
         ${taskActionButtons(task, currentUser, {
@@ -2224,8 +2249,12 @@ async function initIntelligencePage(currentUser) {
 
   async function refreshTasks() {
     try {
+      const tasksUrl = (roleKey === "volunteer" && dispatchMode === "volunteer_choice")
+        ? `/api/tasks/nearby`
+        : `/api/tasks`;
+        
       const [taskData, overview] = await Promise.all([
-        apiFetch("/api/tasks"),
+        apiFetch(tasksUrl),
         apiFetch("/api/overview")
       ]);
 
@@ -2306,10 +2335,15 @@ async function initIntelligencePage(currentUser) {
       }
 
       if (actionType === "complete") {
-        await apiFetch(`/api/tasks/${taskId}/complete`, {
-          method: "POST"
+        openFeedbackModal(taskId, async (feedbackData) => {
+          await apiFetch(`/api/tasks/${taskId}/feedback`, {
+            method: "POST",
+            body: feedbackData
+          });
+          showGlobalBanner("Task completed. Thank you for your feedback!", "success");
+          await refreshTasks();
         });
-        showGlobalBanner("Task marked complete.", "success");
+        return;
       }
 
       await refreshTasks();
@@ -2335,6 +2369,10 @@ async function initIntelligencePage(currentUser) {
       }
     });
   }
+
+  document.addEventListener("refreshTasks", () => {
+    refreshTasks().catch(console.error);
+  });
 
   await refreshTasks();
 }
@@ -4094,6 +4132,288 @@ async function initSignupPage(currentUser) {
   });
 }
 
+// ────────────────────────────────────────────────────────────
+// Feedback Modal (replaces direct complete action)
+// ────────────────────────────────────────────────────────────
+function openFeedbackModal(taskId, onSubmit) {
+  let existing = document.getElementById("feedbackModal");
+  if (existing) existing.remove();
+
+  const modal = document.createElement("div");
+  modal.id = "feedbackModal";
+  modal.className = "feedback-modal-overlay";
+  modal.innerHTML = `
+    <div class="feedback-modal-card">
+      <button class="feedback-modal-close" type="button" aria-label="Close">&times;</button>
+      <h3>Task Verification &amp; Feedback</h3>
+      <p class="helper-copy">Did this task describe a real need?</p>
+      <div class="feedback-verified-row">
+        <button class="feedback-verified-btn is-active" data-verified="true" type="button">✅ Yes, verified</button>
+        <button class="feedback-verified-btn" data-verified="false" type="button">❌ False report</button>
+      </div>
+      <label class="feedback-label">
+        Rating
+        <div class="feedback-star-row" id="feedbackStars">
+          ${[1,2,3,4,5].map(n => `<button class="feedback-star${n <= 3 ? " is-active" : ""}" type="button" data-star="${n}">★</button>`).join("")}
+        </div>
+      </label>
+      <label class="feedback-label">
+        Comments (optional)
+        <textarea id="feedbackComments" rows="3" placeholder="Any notes for coordinators…"></textarea>
+      </label>
+      <div class="feedback-actions">
+        <button class="cta-button" id="feedbackSubmitBtn" type="button">Submit &amp; complete</button>
+        <button class="ghost-button" id="feedbackCancelBtn" type="button">Cancel</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(modal);
+  document.body.classList.add("modal-open");
+
+  let verified = true;
+  let rating = 3;
+
+  modal.querySelectorAll("[data-verified]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      modal.querySelectorAll("[data-verified]").forEach(b => b.classList.remove("is-active"));
+      btn.classList.add("is-active");
+      verified = btn.dataset.verified === "true";
+    });
+  });
+
+  modal.querySelectorAll("[data-star]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      rating = Number(btn.dataset.star);
+      modal.querySelectorAll("[data-star]").forEach(s => {
+        s.classList.toggle("is-active", Number(s.dataset.star) <= rating);
+      });
+    });
+  });
+
+  function closeModal() {
+    modal.remove();
+    document.body.classList.remove("modal-open");
+  }
+
+  modal.querySelector(".feedback-modal-close").addEventListener("click", closeModal);
+  modal.querySelector("#feedbackCancelBtn").addEventListener("click", closeModal);
+  modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+
+  modal.querySelector("#feedbackSubmitBtn").addEventListener("click", async () => {
+    const comments = document.getElementById("feedbackComments")?.value || "";
+    try {
+      await onSubmit({ rating, verified, comments });
+    } catch (error) {
+      showGlobalBanner(error.message || "Could not submit feedback.", "error");
+    }
+    closeModal();
+  });
+}
+
+// ────────────────────────────────────────────────────────────
+// SOS Button
+// ────────────────────────────────────────────────────────────
+function initSOSButton(currentUser) {
+  if (!currentUser || getRoleKey(currentUser) !== "volunteer") return;
+  if (document.getElementById("sosFloatingBtn")) return;
+
+  const btn = document.createElement("button");
+  btn.id = "sosFloatingBtn";
+  btn.className = "sos-floating-btn";
+  btn.type = "button";
+  btn.setAttribute("aria-label", "Send SOS alert");
+  btn.innerHTML = `<span class="sos-icon">🚨</span><span class="sos-label">SOS</span>`;
+  document.body.appendChild(btn);
+
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.classList.add("is-sending");
+    try {
+      let latitude = null;
+      let longitude = null;
+      if (navigator.geolocation) {
+        const pos = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+        }).catch(() => null);
+        if (pos) {
+          latitude = pos.coords.latitude;
+          longitude = pos.coords.longitude;
+        }
+      }
+      await apiFetch("/api/volunteers/sos", {
+        method: "POST",
+        body: { latitude, longitude }
+      });
+      showGlobalBanner("SOS alert sent! Coordinators have been notified.", "success");
+    } catch (error) {
+      showGlobalBanner(error.message || "Could not send SOS alert.", "error");
+    }
+    btn.disabled = false;
+    btn.classList.remove("is-sending");
+  });
+}
+
+// ────────────────────────────────────────────────────────────
+// Gamification Card
+// ────────────────────────────────────────────────────────────
+function initGamificationCard(currentUser) {
+  const container = document.getElementById("gamificationCard");
+  if (!container || !currentUser) return;
+
+  container.innerHTML = `
+    <article class="gamification-card">
+      <div class="gamification-header">
+        <span class="eyebrow">Your stats</span>
+        <h3>${escapeHtml(currentUser.name || "Volunteer")}</h3>
+      </div>
+      <div class="gamification-stats">
+        <div class="gamification-stat">
+          <span class="gamification-stat-value">${currentUser.points || 0}</span>
+          <span class="gamification-stat-label">Points</span>
+        </div>
+        <div class="gamification-stat">
+          <span class="gamification-stat-value">${Number(currentUser.trustScore || 0).toFixed(2)}</span>
+          <span class="gamification-stat-label">Trust</span>
+        </div>
+        <div class="gamification-stat">
+          <span class="gamification-stat-value">${(currentUser.badges || []).length}</span>
+          <span class="gamification-stat-label">Badges</span>
+        </div>
+      </div>
+      ${(currentUser.badges || []).length
+        ? `<div class="gamification-badges">${(currentUser.badges || []).map(b => `<span class="gamification-badge">${escapeHtml(b)}</span>`).join("")}</div>`
+        : `<p class="helper-copy">Complete tasks to earn your first badge!</p>`
+      }
+    </article>
+  `;
+}
+
+// ────────────────────────────────────────────────────────────
+// Leaderboard
+// ────────────────────────────────────────────────────────────
+async function initLeaderboard() {
+  const container = document.getElementById("leaderboardSection");
+  if (!container || !getToken()) return;
+
+  try {
+    const data = await apiFetch("/api/leaderboard");
+    const entries = data.leaderboard || [];
+    if (!entries.length) {
+      container.innerHTML = `<div class="empty-state"><p>No leaderboard entries yet.</p></div>`;
+      return;
+    }
+    container.innerHTML = `
+      <div class="leaderboard-table-wrap">
+        <table class="leaderboard-table">
+          <thead>
+            <tr><th>#</th><th>Name</th><th>Role</th><th>Points</th><th>Badges</th></tr>
+          </thead>
+          <tbody>
+            ${entries.map(entry => `
+              <tr class="${entry.rank <= 3 ? "is-top" : ""}">
+                <td class="leaderboard-rank">${entry.rank <= 3 ? ["🥇","🥈","🥉"][entry.rank-1] : entry.rank}</td>
+                <td>${escapeHtml(entry.name)}</td>
+                <td><span class="pill-tag">${escapeHtml(entry.roleLabel)}</span></td>
+                <td><strong>${entry.points}</strong></td>
+                <td>${(entry.badges || []).map(b => `<span class="gamification-badge sm">${escapeHtml(b)}</span>`).join(" ") || "—"}</td>
+              </tr>
+            `).join("")}
+          </tbody>
+        </table>
+      </div>
+    `;
+  } catch (error) {
+    container.innerHTML = `<div class="empty-state"><p>Could not load leaderboard.</p></div>`;
+  }
+}
+
+// ────────────────────────────────────────────────────────────
+// Admin: Vetting Queue & SOS Alerts
+// ────────────────────────────────────────────────────────────
+async function initAdminVettingAndSOS() {
+  const vettingStack = document.getElementById("vettingQueue");
+  const sosStack = document.getElementById("sosAlertStack");
+
+  if (!vettingStack && !sosStack) return;
+
+  async function refreshVettingAndSOS() {
+    try {
+      if (vettingStack) {
+        const data = await apiFetch("/api/coordinators/vetting-queue");
+        vettingStack.innerHTML = (data.items || []).length
+          ? data.items.map(item => `
+            <article class="task-card compact urgent">
+              <div class="task-card-header">
+                <span class="severity-badge ${escapeHtml(item.severity || "stable")}">${escapeHtml(capitalize(item.severity || "stable"))}</span>
+                <span class="task-card-kicker">Pending vetting</span>
+              </div>
+              <h3>${escapeHtml(item.title || "Untitled")}</h3>
+              <p class="task-card-summary">${escapeHtml(item.description || "").slice(0, 120)}</p>
+              <p class="helper-copy">${escapeHtml(item.locationName || "")} · ${escapeHtml(item.reporter || "")} · ${item.peopleServed || 0} people</p>
+              <div class="review-card-actions">
+                <button class="cta-button" type="button" data-vet-action="approve" data-vet-id="${escapeHtml(item.id)}">Approve</button>
+                <button class="danger-button" type="button" data-vet-action="reject" data-vet-id="${escapeHtml(item.id)}">Reject</button>
+              </div>
+            </article>
+          `).join("")
+          : `<div class="empty-state"><p>No tasks awaiting vetting.</p></div>`;
+      }
+
+      if (sosStack) {
+        const data = await apiFetch("/api/sos/active");
+        sosStack.innerHTML = (data.alerts || []).length
+          ? data.alerts.map(alert => `
+            <article class="task-card compact critical sos-alert-card">
+              <div class="task-card-header">
+                <span class="severity-badge critical">🚨 SOS</span>
+                <span class="task-card-kicker">Active</span>
+              </div>
+              <h3>${escapeHtml(alert.volunteerName || "Unknown volunteer")}</h3>
+              <p class="helper-copy">${alert.latitude && alert.longitude ? `${Number(alert.latitude).toFixed(4)}, ${Number(alert.longitude).toFixed(4)}` : "Location unknown"}</p>
+              <div class="review-card-actions">
+                <button class="cta-button" type="button" data-sos-resolve="${escapeHtml(alert.id)}">Resolve</button>
+              </div>
+            </article>
+          `).join("")
+          : `<div class="empty-state"><p>No active SOS alerts.</p></div>`;
+      }
+    } catch (error) {
+      console.error("Vetting/SOS refresh error:", error);
+    }
+  }
+
+  document.addEventListener("click", async (event) => {
+    const vetBtn = event.target.closest("[data-vet-action]");
+    if (vetBtn) {
+      const taskId = vetBtn.dataset.vetId;
+      const approved = vetBtn.dataset.vetAction === "approve";
+      try {
+        await apiFetch(`/api/tasks/${taskId}/vet`, { method: "POST", body: { approved } });
+        showGlobalBanner(approved ? "Task approved." : "Task rejected.", "success");
+        await refreshVettingAndSOS();
+      } catch (error) {
+        showGlobalBanner(error.message || "Could not update task.", "error");
+      }
+      return;
+    }
+
+    const sosBtn = event.target.closest("[data-sos-resolve]");
+    if (sosBtn) {
+      const alertId = sosBtn.dataset.sosResolve;
+      try {
+        await apiFetch(`/api/sos/${alertId}/resolve`, { method: "POST" });
+        showGlobalBanner("SOS alert resolved.", "success");
+        await refreshVettingAndSOS();
+      } catch (error) {
+        showGlobalBanner(error.message || "Could not resolve alert.", "error");
+      }
+    }
+  });
+
+  await refreshVettingAndSOS();
+  window.setInterval(refreshVettingAndSOS, 30000);
+}
+
 async function bootstrap() {
   initFadeIn();
   attachFlash();
@@ -4119,6 +4439,188 @@ async function bootstrap() {
   await initAdminPage();
   await initReportPage();
   await initProfilePage(currentUser);
+  initSOSButton(currentUser);
+  initGamificationCard(currentUser);
+  await initLeaderboard();
+  await initAdminVettingAndSOS();
+  
+  if (getRoleKey(currentUser) === "volunteer") {
+    initDispatchSystem(currentUser);
+  }
 }
+
+// ------------------------------------------------------------------
+// DISPATCH & MATCHING SYSTEM
+// ------------------------------------------------------------------
+
+function initDispatchSystem(currentUser) {
+  // 1. Dispatch Toggle Logic
+  const toggles = document.querySelectorAll('input[type="checkbox"][id^="dispatchModeToggle"]');
+  toggles.forEach(toggle => {
+    toggle.checked = dispatchMode === "auto_assign";
+    toggle.addEventListener("change", (e) => {
+      dispatchMode = e.target.checked ? "auto_assign" : "volunteer_choice";
+      toggles.forEach(t => { if (t !== e.target) t.checked = e.target.checked; });
+      
+      const hints = document.querySelectorAll('.dispatch-toggle-hint');
+      hints.forEach(hint => {
+        hint.textContent = dispatchMode === "auto_assign" 
+          ? "You will be automatically assigned nearby urgent tasks via push alerts."
+          : "You can browse and select tasks manually from the queue.";
+      });
+
+      if (currentVolunteerLocation) {
+        apiFetch(`/api/volunteers/${currentUser.id}/location`, {
+          method: "POST",
+          body: {
+            lat: currentVolunteerLocation.lat,
+            lng: currentVolunteerLocation.lng,
+            status: "available",
+            autoDispatch: dispatchMode === "auto_assign"
+          }
+        }).catch(console.error);
+      }
+      
+      // Refresh task lists manually if we are on pages that use them
+      const refreshBtn = document.querySelector('[data-nav="my_tasks"].is-active') || document.querySelector('[data-nav="intelligence"].is-active');
+      if (refreshBtn) {
+        // Find if initIntelligencePage is active, it has its own refresh. We can reload or trigger a custom event.
+        // Quickest way to refresh is to just reload page or let polling catch up.
+        // But since we want instant feedback, let's dispatch a custom event.
+        document.dispatchEvent(new Event("refreshTasks"));
+      }
+    });
+  });
+
+  // 2. Geolocation Tracking
+  if ("geolocation" in navigator) {
+    let lastPingTime = 0;
+    locationWatchId = navigator.geolocation.watchPosition(
+      (position) => {
+        currentVolunteerLocation = { lat: position.coords.latitude, lng: position.coords.longitude };
+        
+        // Throttle to max 1 ping every 10 seconds to avoid lag
+        const now = Date.now();
+        if (now - lastPingTime < 10000) return;
+        lastPingTime = now;
+
+        apiFetch(`/api/volunteers/${currentUser.id}/location`, {
+          method: "POST",
+          body: {
+            lat: currentVolunteerLocation.lat,
+            lng: currentVolunteerLocation.lng,
+            status: "available",
+            autoDispatch: dispatchMode === "auto_assign"
+          }
+        }).catch(console.warn);
+      },
+      (error) => {
+        console.warn("Geolocation tracking error:", error);
+      },
+      { enableHighAccuracy: false, maximumAge: 30000, timeout: 10000 }
+    );
+  }
+
+  // 3. SSE Connection for Dispatch Notifications
+  if (window.EventSource) {
+    const token = getToken();
+    dispatchEventSource = new EventSource(`/api/volunteers/${currentUser.id}/notifications?token=${token}`);
+    
+    dispatchEventSource.addEventListener("dispatch", (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "task_assigned" && data.task) {
+          openAutoAssignModal(data.task, data.mode);
+        }
+      } catch (err) {
+        console.error("Error parsing dispatch event", err);
+      }
+    });
+  }
+}
+
+let currentAutoAssignTaskId = null;
+
+function openAutoAssignModal(task, mode) {
+  const modal = document.getElementById("autoAssignModal");
+  const content = document.getElementById("autoAssignContent");
+  if (!modal || !content) return;
+
+  currentAutoAssignTaskId = task.id;
+
+  const severityLabel = capitalize(task.severity || "urgent");
+  const timeDisplay = typeof task.routeTimeSeconds === 'number' 
+    ? Math.round(task.routeTimeSeconds / 60) + ' min ETA'
+    : 'Unknown ETA';
+  const distDisplay = typeof task.routeDistanceMeters === 'number'
+    ? (task.routeDistanceMeters / 1000).toFixed(1) + ' km away'
+    : '';
+  const distanceMarkup = distDisplay ? `(${escapeHtml(distDisplay)})` : "";
+
+  content.innerHTML = `
+    <div class="auto-assign-header">
+      <span class="severity-tag ${escapeHtml(task.severity || 'urgent')}">${escapeHtml(severityLabel)} Task Alert</span>
+      <h2>${escapeHtml(task.title || "New Task Assignment")}</h2>
+      <p>${escapeHtml(task.locationName || "Nearby Location")}</p>
+      
+      <div class="auto-assign-eta">
+        <span>ETA:</span>${escapeHtml(timeDisplay)} ${distanceMarkup}
+      </div>
+      
+      <div class="auto-assign-actions">
+        <button class="ghost-button" type="button" onclick="handleAutoAssignDecline()">Decline</button>
+        <button class="cta-button" type="button" onclick="handleAutoAssignAccept()">Accept Task</button>
+      </div>
+    </div>
+  `;
+
+  modal.classList.remove("hidden");
+}
+
+function closeAutoAssignModal() {
+  const modal = document.getElementById("autoAssignModal");
+  if (modal) modal.classList.add("hidden");
+  currentAutoAssignTaskId = null;
+}
+
+window.handleAutoAssignAccept = async function() {
+  if (!currentAutoAssignTaskId) return;
+  const taskId = currentAutoAssignTaskId;
+  closeAutoAssignModal();
+  try {
+    await apiFetch(`/api/tasks/${taskId}/accept`, { method: "POST" });
+    showGlobalBanner("Task accepted and assigned to you.", "success");
+    document.dispatchEvent(new Event("refreshTasks"));
+  } catch (err) {
+    showGlobalBanner(err.message || "Failed to accept task.", "error");
+  }
+};
+
+window.handleAutoAssignDecline = async function() {
+  if (!currentAutoAssignTaskId) return;
+  const taskId = currentAutoAssignTaskId;
+  closeAutoAssignModal();
+  try {
+    await apiFetch(`/api/tasks/${taskId}/decline`, { method: "POST", body: { notes: "Declined via Auto-Assign UI" } });
+    showGlobalBanner("Task declined. We will rematch it.", "info");
+  } catch (err) {
+    showGlobalBanner(err.message || "Failed to decline task.", "error");
+  }
+};
+
+// Also listen for accept button clicks from task list (in volunteer_choice mode)
+document.addEventListener("click", async (event) => {
+  const acceptBtn = event.target.closest("[data-task-action='accept']");
+  if (acceptBtn) {
+    const taskId = acceptBtn.dataset.taskId;
+    try {
+      await apiFetch(`/api/tasks/${taskId}/accept`, { method: "POST" });
+      showGlobalBanner("Task accepted.", "success");
+      document.dispatchEvent(new Event("refreshTasks"));
+    } catch (err) {
+      showGlobalBanner(err.message || "Failed to accept task.", "error");
+    }
+  }
+});
 
 document.addEventListener("DOMContentLoaded", bootstrap);
