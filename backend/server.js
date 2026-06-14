@@ -8264,13 +8264,17 @@ app.post("/api/tasks/:id/feedback", requireAuth, requireRole(["volunteer", "admi
     const verified = request.body.verified !== false;
     const comments = String(request.body.comments || "").trim();
 
-    const volunteer = await Volunteer.findOne({ where: { userId: request.user.id } });
+    const volunteer = await ensureVolunteerProfileForUser(request.user.id);
+    if (!volunteer) {
+      response.status(400).json({ error: "Volunteer profile not found." });
+      return;
+    }
 
     const feedback = await sequelize.transaction(async (transaction) => {
       const created = await TaskFeedback.create({
         id: createId("feedback"),
         taskId: task.id,
-        volunteerId: request.user.id,
+        volunteerId: volunteer.id,
         rating,
         verified,
         comments
