@@ -1482,6 +1482,21 @@ textarea {
   box-shadow: var(--shadow-soft);
 }
 
+.csr-receipt-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.csr-receipt-card .report-row {
+  flex: 1 1 auto;
+}
+
+.csr-receipt-button {
+  align-self: flex-start;
+  margin-top: 18px;
+  width: fit-content;
+}
+
 .snapshot-card:nth-child(1) {
   background: var(--card-accent-bg-1);
   transform: translateY(10px);
