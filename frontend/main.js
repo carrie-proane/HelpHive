@@ -616,11 +616,20 @@ function renderMobileNavigation(currentUser) {
   let utilityMarkup = "";
 
   if (currentUser) {
+    const accountName =
+      roleKey === "csr"
+        ? currentUser.companyName || currentUser.name || BRAND_NAME
+        : currentUser.name || BRAND_NAME;
+    const accountSubtext =
+      roleKey === "csr"
+        ? currentUser.name || "Contact person"
+        : roleLabels[roleKey] || prettyLabel(currentUser.role);
+
     utilityMarkup = `
       <div class="mobile-nav-user">
-        <div class="user-badge">
-          <strong>${escapeHtml(currentUser.name || BRAND_NAME)}</strong>
-          <span>${escapeHtml(roleLabels[roleKey] || prettyLabel(currentUser.role))}</span>
+        <div class="user-badge ${roleKey === "csr" ? "account-stack" : ""}">
+          <strong>${escapeHtml(accountName)}</strong>
+          <span>${escapeHtml(accountSubtext)}</span>
         </div>
       </div>
       <div class="mobile-nav-actions">
@@ -901,8 +910,8 @@ function buildOcrBatchSummaryCopyMarkup(payload = {}) {
       <strong>${escapeHtml(`${taskCount} task created from ${processedCount} image${processedCount === 1 ? "" : "s"}`)}</strong>
       <p class="helper-copy">${escapeHtml(`${passedCount} of ${processedCount} processed image${processedCount === 1 ? "" : "s"} cleared the confidence threshold.`)}</p>
       ${failedCount
-        ? `<p class="helper-copy">${escapeHtml(`${failedCount} image${failedCount === 1 ? "" : "s"} could not be processed in this batch.`)}</p>`
-        : ""}
+      ? `<p class="helper-copy">${escapeHtml(`${failedCount} image${failedCount === 1 ? "" : "s"} could not be processed in this batch.`)}</p>`
+      : ""}
     </div>
   `;
 }
@@ -947,8 +956,8 @@ function buildOcrCarouselCardMarkup(entry = {}, index = 0, activeIndex = 0, inte
   return `
     <button class="ocr-carousel-card ${activeClass} ${staticClass}" ${actionAttributes}>
       ${entry.imageUrl
-        ? `<img src="${escapeHtml(entry.imageUrl)}" alt="${escapeHtml(entry.filename || `Survey image ${index + 1}`)}" loading="lazy" />`
-        : ""}
+      ? `<img src="${escapeHtml(entry.imageUrl)}" alt="${escapeHtml(entry.filename || `Survey image ${index + 1}`)}" loading="lazy" />`
+      : ""}
       <strong>${escapeHtml(entry.filename || `Survey image ${index + 1}`)}</strong>
       <p class="helper-copy">Confidence: ${escapeHtml(entry.error ? "Not available" : formatConfidence(confidence))}</p>
       <span class="ocr-carousel-status ${statusClass}">${escapeHtml(statusLabel)}</span>
@@ -993,10 +1002,10 @@ function getMergedOcrContent(payload = {}) {
     .map((entry) =>
       String(
         entry?.ocr?.formattedContent ||
-          entry?.ocr?.cleanedContent ||
-          entry?.ocr?.text ||
-          entry?.ocr?.rawText ||
-          ""
+        entry?.ocr?.cleanedContent ||
+        entry?.ocr?.text ||
+        entry?.ocr?.rawText ||
+        ""
       ).trim()
     )
     .filter(Boolean)
@@ -1026,8 +1035,8 @@ function buildOcrBatchModalMarkup(payload = {}, activeIndex = 0) {
     <section class="ocr-carousel">
       <div class="ocr-carousel__row">
         ${results
-          .map((entry, index) => buildOcrCarouselCardMarkup(entry, index, activeIndex, hasMultipleImages))
-          .join("")}
+      .map((entry, index) => buildOcrCarouselCardMarkup(entry, index, activeIndex, hasMultipleImages))
+      .join("")}
       </div>
       ${hasMultipleImages ? buildOcrExpandedPreviewMarkup(selectedEntry) : ""}
     </section>
@@ -1037,8 +1046,8 @@ function buildOcrBatchModalMarkup(payload = {}, activeIndex = 0) {
         <p class="helper-copy">This structured summary was created from the processed survey images in this batch.</p>
       </div>
       ${extractedText
-        ? renderOcrTextMarkup(extractedText)
-        : '<p class="helper-copy">No merged content was returned for this OCR batch.</p>'}
+      ? renderOcrTextMarkup(extractedText)
+      : '<p class="helper-copy">No merged content was returned for this OCR batch.</p>'}
     </section>
   `;
 }
@@ -1506,15 +1515,23 @@ function renderHeaderActions(currentUser) {
     const partnersBtn = roleKey === "csr"
       ? `<a class="ghost-button" href="./csr-dashboard.html?tab=partners">Partners</a>`
       : "";
+    const accountName =
+      roleKey === "csr"
+        ? currentUser.companyName || currentUser.name || BRAND_NAME
+        : currentUser.name || BRAND_NAME;
+    const accountSubtext =
+      roleKey === "csr"
+        ? currentUser.name || "Contact person"
+        : roleLabels[roleKey] || prettyLabel(currentUser.role);
 
     slot.innerHTML = `
       <div class="header-link-row">
         ${partnersBtn}
         <a class="ghost-button" href="${roleHomes[roleKey] || "./intelligence.html"}">Dashboard</a>
         <a class="ghost-button" href="./profile.html">Profile</a>
-        <div class="user-badge">
-          <strong>${escapeHtml(currentUser.name || BRAND_NAME)}</strong>
-          <span>${escapeHtml(roleLabels[roleKey] || prettyLabel(currentUser.role))}</span>
+        <div class="user-badge ${roleKey === "csr" ? "account-stack" : ""}">
+          <strong>${escapeHtml(accountName)}</strong>
+          <span>${escapeHtml(accountSubtext)}</span>
         </div>
         <button class="soft-button" type="button" data-logout>Logout</button>
       </div>
@@ -2469,16 +2486,15 @@ async function initImpactPage(currentUser) {
     const term = (searchTerm || "").toLowerCase().trim();
     const filtered = term
       ? cachedNgos.filter(
-          (ngo) =>
-            ngo.name.toLowerCase().includes(term) ||
-            (ngo.baseLocation || "").toLowerCase().includes(term)
-        )
+        (ngo) =>
+          ngo.name.toLowerCase().includes(term) ||
+          (ngo.baseLocation || "").toLowerCase().includes(term)
+      )
       : cachedNgos;
 
     if (!filtered.length) {
-      ngoListContainer.innerHTML = `<div class="empty-state"><p>${
-        term ? "No partners match your search." : "No NGO partners registered yet."
-      }</p></div>`;
+      ngoListContainer.innerHTML = `<div class="empty-state"><p>${term ? "No partners match your search." : "No NGO partners registered yet."
+        }</p></div>`;
       return;
     }
 
@@ -2702,7 +2718,7 @@ async function initImpactPage(currentUser) {
     if (_csrDonutChart) { _csrDonutChart.destroy(); _csrDonutChart = null; }
 
     /* ── Pad sparse monthly data with surrounding empty months for visual context ── */
-    const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+    const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     let paddedSeries = series;
     if (series.length > 0 && series.length < 4) {
       const firstMonthStr = series[0].month;
@@ -3017,7 +3033,7 @@ async function initImpactPage(currentUser) {
             '<span class="impact-viz__legend-dot" style="background:' + DONUT_COLORS[i % DONUT_COLORS.length] + '"></span>' +
             '<span class="impact-viz__legend-text">' + c.label + '</span>' +
             '<span class="impact-viz__legend-count">' + c.value + '</span>' +
-          '</div>';
+            '</div>';
         }).join("");
       }
     }
