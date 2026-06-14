@@ -2665,16 +2665,10 @@ async function initImpactPage(currentUser) {
     }
 
     if (receiptList) {
-      const combinedRows = [
-        ...(report.receiptLines || []).map((line) => ({
-          title: line.title,
-          meta: `${line.locationName} · ${line.volunteers} volunteers · ${line.outputMetric || line.completedAt}`
-        })),
-        ...(report.recentReports || []).map((item) => ({
-          title: "Previous export",
-          meta: new Date(item.generatedAt).toLocaleString("en-IN")
-        }))
-      ];
+      const combinedRows = (report.receiptLines || []).map((line) => ({
+        title: line.title,
+        meta: `${line.locationName} · ${line.volunteers} volunteers · ${line.outputMetric || line.completedAt}`
+      }));
 
       receiptList.innerHTML = combinedRows.length
         ? combinedRows

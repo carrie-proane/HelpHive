@@ -216,8 +216,7 @@ function normalizeDatabaseConnection(connection) {
     host: connection.connectionParts?.host || "",
     displayUrl:
       connection.displayUrl ||
-      `postgres://${encodeURIComponent(connection.connectionParts?.username || "unknown")}:****@${
-        connection.connectionParts?.host || "unknown"
+      `postgres://${encodeURIComponent(connection.connectionParts?.username || "unknown")}:****@${connection.connectionParts?.host || "unknown"
       }/${connection.connectionParts?.database || "unknown"}`
   };
 }
@@ -344,9 +343,9 @@ const sequelizeOptions = {
 const sequelize = DATABASE_CONNECTION.connectionString
   ? new Sequelize(DATABASE_CONNECTION.connectionString, sequelizeOptions)
   : new Sequelize({
-      ...DATABASE_CONNECTION.connectionParts,
-      ...sequelizeOptions
-    });
+    ...DATABASE_CONNECTION.connectionParts,
+    ...sequelizeOptions
+  });
 const LOCATION_DATA_TYPE = USE_POSTGIS ? DataTypes.GEOGRAPHY("POINT", 4326) : DataTypes.JSONB;
 
 const ROLE_ALIASES = {
@@ -708,8 +707,8 @@ function buildTaskRoutingProfile(input = {}) {
       : "",
     normalizedDescription.includes("afternoon") ? "afternoon" : "",
     normalizedDescription.includes("evening") ||
-    normalizedDescription.includes("night") ||
-    normalizedDescription.includes("dinner")
+      normalizedDescription.includes("night") ||
+      normalizedDescription.includes("dinner")
       ? "evening"
       : "",
     normalizedDescription.includes("weekend") ? "weekend" : "",
@@ -1390,9 +1389,9 @@ async function findOpenTasksNear(location, radiusMeters = DISPATCH_DEFAULT_RADIU
     );
     return rows.length
       ? Task.findAll({
-          where: { id: { [Op.in]: rows.map((row) => row.id) } },
-          include: [{ model: User, as: "ngo" }]
-        })
+        where: { id: { [Op.in]: rows.map((row) => row.id) } },
+        include: [{ model: User, as: "ngo" }]
+      })
       : [];
   }
 
@@ -2353,10 +2352,10 @@ function computeMatchScore(task, volunteer, teammates = []) {
     : 0;
   const communicationComplement = teammates.length
     ? teammates.every(
-        (teammate) =>
-          normalizeCommunicationStyle(teammate.communicationStyle) !==
-          normalizeCommunicationStyle(volunteer.communicationStyle)
-      )
+      (teammate) =>
+        normalizeCommunicationStyle(teammate.communicationStyle) !==
+        normalizeCommunicationStyle(volunteer.communicationStyle)
+    )
       ? 1
       : 0
     : 0;
@@ -3674,21 +3673,21 @@ async function buildTaskPayload(task, currentUser = null) {
     task.assignments && task.ngo
       ? task
       : await Task.findByPk(task.id, {
-          include: [
-            { model: User, as: "ngo" },
-            {
-              model: Assignment,
-              as: "assignments",
-              include: [
-                {
-                  model: Volunteer,
-                  as: "volunteer",
-                  include: [{ model: User, as: "user" }]
-                }
-              ]
-            }
-          ]
-        });
+        include: [
+          { model: User, as: "ngo" },
+          {
+            model: Assignment,
+            as: "assignments",
+            include: [
+              {
+                model: Volunteer,
+                as: "volunteer",
+                include: [{ model: User, as: "user" }]
+              }
+            ]
+          }
+        ]
+      });
 
   const assignedVolunteerProfiles = (taskWithRelations.assignments || [])
     .map((assignment) => assignment.volunteer)
@@ -3760,11 +3759,11 @@ async function buildTaskPayload(task, currentUser = null) {
           ? TASK_STATUS.REJECTED
           : [TASK_STATUS.PENDING, TASK_STATUS.CONFIRMED, TASK_STATUS.AUTO_ACCEPTED].includes(taskWithRelations.status)
             ? taskWithRelations.status
-          : taskWithRelations.completedAt || taskWithRelations.status === TASK_STATUS.COMPLETED
-            ? TASK_STATUS.COMPLETED
-            : taskWithRelations.isAssigned
-              ? "in_progress"
-              : TASK_STATUS.OPEN,
+            : taskWithRelations.completedAt || taskWithRelations.status === TASK_STATUS.COMPLETED
+              ? TASK_STATUS.COMPLETED
+              : taskWithRelations.isAssigned
+                ? "in_progress"
+                : TASK_STATUS.OPEN,
     requiredSkills: routingProfile.requiredSkills,
     complementarySkills: routingProfile.complementarySkills,
     assignedUsers,
@@ -3794,13 +3793,13 @@ async function buildTaskPayload(task, currentUser = null) {
     buddyReasons: availableSuggestions.map(({ score }) => score.reasons).flat(),
     currentUserMatch: currentUserMatch
       ? {
-          score: currentUserMatch.score,
-          reasons: currentUserMatch.reasons,
-          distanceKm:
-            currentUserMatch.distanceKm === null
-              ? null
-              : Number(currentUserMatch.distanceKm.toFixed(1))
-        }
+        score: currentUserMatch.score,
+        reasons: currentUserMatch.reasons,
+        distanceKm:
+          currentUserMatch.distanceKm === null
+            ? null
+            : Number(currentUserMatch.distanceKm.toFixed(1))
+      }
       : null,
     distanceKm: distanceKm === null ? null : Number(distanceKm.toFixed(1))
   };
@@ -3904,8 +3903,8 @@ async function createDispatchTaskFromRequest(body = {}, reporter) {
     reporter.role === "ngo" || reporter.role === "admin"
       ? reporter
       : (await User.findOne({ where: { role: "ngo" }, order: [["name", "ASC"]] })) ||
-        (await User.findOne({ where: { role: "admin" }, order: [["name", "ASC"]] })) ||
-        reporter;
+      (await User.findOne({ where: { role: "admin" }, order: [["name", "ASC"]] })) ||
+      reporter;
 
   const task = await createTaskRecord({
     ngoUserId: ngoDesk.id,
@@ -4508,7 +4507,7 @@ async function buildCSRStats(companyId, filters = {}) {
         Math.round(
           ((readTimestamp(task, "completedAt", "updatedAt") || new Date()).getTime() -
             (readTimestamp(task, "createdAt", "updatedAt") || new Date()).getTime()) /
-            (1000 * 60 * 60)
+          (1000 * 60 * 60)
         ),
         1
       )
@@ -4587,9 +4586,8 @@ async function buildCSRStats(companyId, filters = {}) {
 
   const rangeLabel =
     dateRange.startDate || dateRange.endDate
-      ? `between ${dateRange.startDate ? dateRange.startDate.toLocaleDateString("en-IN") : "the start"} and ${
-          dateRange.endDate ? dateRange.endDate.toLocaleDateString("en-IN") : "today"
-        }`
+      ? `between ${dateRange.startDate ? dateRange.startDate.toLocaleDateString("en-IN") : "the start"} and ${dateRange.endDate ? dateRange.endDate.toLocaleDateString("en-IN") : "today"
+      }`
       : "across the full reporting window";
 
   return {
@@ -4605,7 +4603,6 @@ async function buildCSRStats(companyId, filters = {}) {
       value
     })),
     monthlyHours,
-    recentReports: reports.map((report) => report.get({ plain: true })),
     receiptLines,
     outcomeMetrics,
     frameworkAlignment,
@@ -4777,11 +4774,11 @@ async function runGeminiStructuredExtraction(filePath, mimeType, prompt, model =
 function getExternalApiErrorStatus(error) {
   return Number(
     error?.status ||
-      error?.statusCode ||
-      error?.code ||
-      error?.response?.status ||
-      error?.error?.code ||
-      0
+    error?.statusCode ||
+    error?.code ||
+    error?.response?.status ||
+    error?.error?.code ||
+    0
   );
 }
 
@@ -5333,7 +5330,7 @@ async function mergeSurveyBatchExtractions(extractions = []) {
 
   const averageConfidence = clampConfidence(
     normalizedExtractions.reduce((sum, entry) => sum + Number(entry.averageConfidence || 0), 0) /
-      normalizedExtractions.length,
+    normalizedExtractions.length,
     0
   );
   const cleanedContent = await reconstructLowConfidenceSurveyText(rawText, averageConfidence);
@@ -5951,11 +5948,11 @@ app.post("/api/whatsapp", async (request, response, next) => {
       const location =
         Number.isFinite(latitude) && Number.isFinite(longitude)
           ? {
-              name: request.body.Address || request.body.Label || "Pinned location",
-              lat: latitude,
-              lng: longitude,
-              ngo: detectLocation(request.body.Address || request.body.Label || "").ngo
-            }
+            name: request.body.Address || request.body.Label || "Pinned location",
+            lat: latitude,
+            lng: longitude,
+            ngo: detectLocation(request.body.Address || request.body.Label || "").ngo
+          }
           : detectLocation(body, "", { allowDefault: false });
 
       if (!location?.name) {
@@ -6159,14 +6156,14 @@ app.get("/api/tasks", requireAuth, async (request, response, next) => {
     const rankedTasks =
       request.user.role === "volunteer"
         ? [...payloads].sort((left, right) => {
-            const scoreDelta =
-              Number(right.currentUserMatch?.score || -999) - Number(left.currentUserMatch?.score || -999);
-            if (scoreDelta !== 0) {
-              return scoreDelta;
-            }
-            const severityOrder = { critical: 0, urgent: 1, stable: 2 };
-            return (severityOrder[left.severity] || 3) - (severityOrder[right.severity] || 3);
-          })
+          const scoreDelta =
+            Number(right.currentUserMatch?.score || -999) - Number(left.currentUserMatch?.score || -999);
+          if (scoreDelta !== 0) {
+            return scoreDelta;
+          }
+          const severityOrder = { critical: 0, urgent: 1, stable: 2 };
+          return (severityOrder[left.severity] || 3) - (severityOrder[right.severity] || 3);
+        })
         : payloads;
     response.json({
       tasks: rankedTasks
@@ -6186,8 +6183,8 @@ app.post(["/api/tasks", "/tasks"], requireAuth, async (request, response, next) 
     ].some((field) => request.body[field] !== undefined);
     const hasDispatchLocation = Boolean(
       request.body.location ||
-        request.body.latitude !== undefined ||
-        request.body.lat !== undefined
+      request.body.latitude !== undefined ||
+      request.body.lat !== undefined
     );
 
     if (hasVerificationFields || !hasDispatchLocation) {
@@ -6502,11 +6499,11 @@ app.get(["/api/tasks/nearby", "/tasks/nearby"], requireAuth, requireRole(["volun
     const volunteer =
       request.user.role === "admin" && request.query.volunteerId
         ? await Volunteer.findOne({
-            where: {
-              [Op.or]: [{ id: request.query.volunteerId }, { userId: request.query.volunteerId }]
-            },
-            include: [{ model: User, as: "user" }]
-          })
+          where: {
+            [Op.or]: [{ id: request.query.volunteerId }, { userId: request.query.volunteerId }]
+          },
+          include: [{ model: User, as: "user" }]
+        })
         : await ensureVolunteerProfileForUser(request.user.id);
 
     if (!volunteer) {
@@ -6882,13 +6879,13 @@ app.post("/api/dispatch/outcomes", requireAuth, async (request, response, next) 
 
     const volunteer = request.body.volunteerId || request.body.volunteer_id
       ? await Volunteer.findOne({
-          where: {
-            [Op.or]: [
-              { id: request.body.volunteerId || request.body.volunteer_id },
-              { userId: request.body.volunteerId || request.body.volunteer_id }
-            ]
-          }
-        })
+        where: {
+          [Op.or]: [
+            { id: request.body.volunteerId || request.body.volunteer_id },
+            { userId: request.body.volunteerId || request.body.volunteer_id }
+          ]
+        }
+      })
       : await Volunteer.findOne({ where: { userId: request.user.id } });
     const assignment = request.body.assignmentId || request.body.assignment_id
       ? await Assignment.findByPk(request.body.assignmentId || request.body.assignment_id)
